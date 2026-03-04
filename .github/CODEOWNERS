@@ -1,0 +1,8 @@
+# Default owner: Bluente GitHub organization.
+* @Bluente
+
+# Suggested ownership split
+/src/clients/ @Bluente
+/src/services/ @Bluente
+/src/tools/ @Bluente
+/.github/ @Bluente

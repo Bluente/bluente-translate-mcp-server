@@ -1,0 +1,29 @@
+{
+  "name": "bluente-translate-mcp-server",
+  "version": "0.2.0",
+  "description": "Open-source MCP server for Bluente translation APIs",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node scripts/check-syntax.mjs",
+    "test": "node --test"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "translation",
+    "bluente"
+  ],
+  "author": "Bluente",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "dotenv": "^16.6.1",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
