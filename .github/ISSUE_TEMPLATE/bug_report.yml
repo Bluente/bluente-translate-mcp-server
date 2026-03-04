@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible defect in the MCP server.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please provide clear reproduction steps and remove all secrets.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Node version, MCP client, OS
+      placeholder: node 20.x, Claude Desktop, macOS 14
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Configure MCP server...
+        2. Call tool...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Redact tokens and private data.
+      render: shell
