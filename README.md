@@ -19,6 +19,10 @@
 
 It wraps Bluente APIs into production-ready MCP tools so teams can automate multilingual document workflows from Claude Desktop, Cursor, and other MCP-compatible runtimes.
 
+<a href="https://glama.ai/mcp/servers/Bluente/bluente-translate">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/Bluente/bluente-translate/badge" alt="bluente-translate MCP server" />
+</a>
+
 ## Why Bluente
 
 Bluente focuses on enterprise-grade document translation where **accuracy, formatting integrity, and speed** matter.
