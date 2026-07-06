@@ -104,10 +104,10 @@ tests/smoke/core-smoke.test.js
 ## Supported Bluente APIs
 
 - `GET /blu_translate/supported_languages`
-- `POST /blu_translate/upload_file`
-- `GET /blu_translate/get_translation_status`
-- `POST /blu_translate/translate_file`
-- `GET /blu_translate/download_file`
+- `POST /blu_translate/upload`
+- `GET /blu_translate/check`
+- `POST /blu_translate/translate`
+- `GET /blu_translate/download`
 
 Reference: [Bluente API Docs](https://www.bluente.com/docs)
 
