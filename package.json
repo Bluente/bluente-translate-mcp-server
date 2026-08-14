@@ -1,9 +1,20 @@
 {
-  "name": "bluente-translate-mcp-server",
+  "name": "@bluente/translate-mcp-server",
   "version": "0.2.0",
   "description": "Open-source MCP server for Bluente translation APIs",
   "type": "module",
   "main": "src/index.js",
+  "bin": {
+    "bluente-translate-mcp": "src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "node src/index.js",
     "check": "node scripts/check-syntax.mjs",
@@ -17,6 +28,12 @@
   ],
   "author": "Bluente",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bluente/bluente-translate-mcp-server.git"
+  },
+  "homepage": "https://www.bluente.com/translator",
+  "bugs": "https://github.com/Bluente/bluente-translate-mcp-server/issues",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
     "dotenv": "^16.6.1",

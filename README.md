@@ -47,8 +47,9 @@ This repository is maintained by **Bluente** and is part of Bluente's public dev
 - [Supported Bluente APIs](#supported-bluente-apis)
 - [MCP Tools](#mcp-tools)
 - [Quick Start](#quick-start)
-- [MCP Client Integration](#mcp-client-integration)
+- [Local Development](#local-development)
 - [Operational Notes](#operational-notes)
+- [Data Handling & Privacy](#data-handling--privacy)
 - [Security](#security)
 - [Roadmap](#roadmap)
 - [Contributing and Governance](#contributing-and-governance)
@@ -156,58 +157,47 @@ Error envelope:
 
 ## Quick Start
 
-### 1. Requirements
+Requirements: Node.js `>= 20` and a Bluente API key.
 
-- Node.js `>= 20`
-- Bluente API key
-
-### 2. Install
-
-```bash
-npm install
-cp .env.example .env
-```
-
-### 3. Configure
-
-```env
-BLUENTE_API_KEY=your_api_key_here
-BLUENTE_API_BASE_URL=https://api.bluente.com/api/20250924
-BLUENTE_API_TIMEOUT_MS=90000
-```
-
-### 4. Run
-
-```bash
-npm start
-```
-
-### 5. Validate locally
-
-```bash
-npm run check
-npm test
-```
-
-## MCP Client Integration
-
-Example for Claude Desktop:
+Add this to your MCP client configuration (Claude Desktop: `claude_desktop_config.json`; Claude Code / Cursor: `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "bluente-translate": {
-      "command": "node",
-      "args": ["/absolute/path/to/bluente-translate-mcp-server/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "@bluente/translate-mcp-server"],
       "env": {
-        "BLUENTE_API_KEY": "your_api_key_here",
-        "BLUENTE_API_BASE_URL": "https://api.bluente.com/api/20250924",
-        "BLUENTE_API_TIMEOUT_MS": "90000"
+        "BLUENTE_API_KEY": "your_api_key_here"
       }
     }
   }
 }
 ```
+
+That's it — no clone or install step. Restart your MCP client and the `bluente_*` tools appear.
+
+Optional environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BLUENTE_API_KEY` | (required) | Your Bluente API key |
+| `BLUENTE_API_BASE_URL` | `https://api.bluente.com/api/20250924` | API base URL |
+| `BLUENTE_API_TIMEOUT_MS` | `90000` | HTTP timeout in milliseconds |
+
+## Local Development
+
+```bash
+git clone https://github.com/bluente/bluente-translate-mcp-server.git
+cd bluente-translate-mcp-server
+npm install
+cp .env.example .env   # then set BLUENTE_API_KEY
+npm start              # run the server on stdio
+npm run check          # syntax check
+npm test               # run tests
+```
+
+To point an MCP client at your local checkout, use `"command": "node"` with `"args": ["/absolute/path/to/bluente-translate-mcp-server/src/index.js"]` instead of the `npx` config above.
 
 ## Operational Notes
 
@@ -215,6 +205,13 @@ Example for Claude Desktop:
 - Output download can be disabled with `auto_download=false`.
 - Timeout is configurable via `BLUENTE_API_TIMEOUT_MS`.
 - For production, use separate API keys per environment.
+
+## Data Handling & Privacy
+
+- **Documents you translate are uploaded to Bluente's API** (`api.bluente.com` by default) for processing. Do not translate documents you are not permitted to send to a third-party service.
+- **The AI model controls the tools.** When run locally (stdio), `file_path` lets the model read any file your user account can read and upload it to Bluente, and `output_path` lets it write downloaded files to any writable path. Review tool calls in your MCP client before approving them, especially when working with untrusted documents — a malicious document could try to instruct the model to misuse these tools.
+- Translated output returned by tools (file contents, status payloads) enters your AI client's context and is therefore visible to your LLM provider.
+- Your API key stays on your machine: it is read from the environment and sent only as an `Authorization` header to the configured Bluente API base URL. It is never logged or included in tool responses.
 
 ## Security
 

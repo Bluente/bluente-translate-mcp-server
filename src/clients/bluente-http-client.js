@@ -133,7 +133,7 @@ export class BluenteHttpClient {
           apiPath,
           status: response.status,
           statusText: response.statusText,
-          responseText
+          responseText: responseText.slice(0, 500)
         });
       }
 
