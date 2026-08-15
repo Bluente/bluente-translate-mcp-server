@@ -157,42 +157,56 @@ Error envelope:
 
 ## Quick Start
 
-Requirements: Node.js `>= 20` and a Bluente API key.
+Requirements: Node.js `>= 20` (check with `node --version`; install from [nodejs.org](https://nodejs.org)) and a Bluente API key.
 
-Add this to your MCP client configuration (Claude Desktop: `claude_desktop_config.json`; Claude Code / Cursor: `.mcp.json`):
+**Getting an API key:** log in at [translate.bluente.com](https://translate.bluente.com) and go to **My Files → API Keys and Webhook**. Treat the key like a password — it authorizes translations billed to your account, so keep it out of version control and shared documents.
 
-```json
-{
-  "mcpServers": {
-    "bluente-translate": {
-      "command": "npx",
-      "args": ["-y", "@bluente/translate-mcp-server"],
-      "env": {
-        "BLUENTE_API_KEY": "your_api_key_here"
-      }
-    }
-  }
-}
+### Option 1: Install manually
+
+**Claude Desktop**
+
+1. Open **Settings → Developer → Edit Config** (opens `claude_desktop_config.json`).
+2. Add this block (merge into `mcpServers` if it already exists), inserting your API key:
+
+   ```json
+   {
+     "mcpServers": {
+       "bluente-translate": {
+         "command": "npx",
+         "args": ["-y", "@bluente/translate-mcp-server"],
+         "env": {
+           "BLUENTE_API_KEY": "your_api_key_here"
+         }
+       }
+     }
+   }
+   ```
+
+3. Quit and reopen Claude Desktop. The tools icon should list six `bluente_*` tools.
+
+**Claude Code** — one command, then restart your session and verify with `/mcp`:
+
+```bash
+claude mcp add bluente-translate -e BLUENTE_API_KEY=your_api_key_here -- npx -y @bluente/translate-mcp-server
 ```
 
-That's it — no clone or install step. Restart your MCP client and the `bluente_*` tools appear.
+**Cursor** — Settings → MCP → Add server, or create `.cursor/mcp.json` in your project with the same JSON block as Claude Desktop.
 
-### Setting your API key
+**Smoke test (any client):** ask *"What languages does Bluente translation support?"* — a free, read-only call. A language list back means the key and connection both work. The first run takes a few extra seconds while `npx` downloads the package.
 
-The server reads `BLUENTE_API_KEY` from its environment — you never pass it as a tool argument or store it in a file. How to set it depends on your client:
+### Option 2: Let your coding agent install it
 
-- **Claude Desktop / Cursor / most MCP clients**: put it in the `env` block of the config JSON, as shown above. The client injects it when launching the server.
-- **Claude Code**: one command does both the install and the key:
+Already using Claude Code, Cursor, or another MCP-capable coding agent? Paste this prompt, replacing `YOUR_KEY_HERE`:
 
-  ```bash
-  claude mcp add bluente-translate -e BLUENTE_API_KEY=your_api_key_here -- npx -y @bluente/translate-mcp-server
-  ```
+> Install the Bluente Translate MCP server into this client. It's the npm package `@bluente/translate-mcp-server`, run via `npx -y @bluente/translate-mcp-server` (stdio), and it needs the environment variable `BLUENTE_API_KEY` set in the server config's `env` block. Use `YOUR_KEY_HERE` as the key. After configuring, verify the installation by calling the `bluente_get_supported_languages` tool and show me the result. Docs: https://github.com/Bluente/bluente-translate-mcp-server
 
-- **Testing from a terminal**: prefix the server command itself, e.g. `BLUENTE_API_KEY=your_api_key_here npx -y @bluente/translate-mcp-server`. (In a shell pipeline, the assignment must sit directly before `npx` — placed at the start of the line it applies only to the first command in the pipe.)
+The agent finds the right config file for its client, writes the block, and runs the verification.
 
-If the server reports `Missing BLUENTE_API_KEY`, the key is not reaching the server process — check for typos in the `env` block and restart your client.
+Prefer not to paste your API key into an agent conversation? Have the agent use `REPLACE_ME` as the key, then edit the config file by hand and restart your client.
 
-To obtain an API key, see the [Bluente API docs](https://www.bluente.com/docs) or contact your Bluente account manager. Treat the key like a password: it authorizes translations billed to your account, so keep it out of version control and shared documents.
+### Troubleshooting the API key
+
+The server reads `BLUENTE_API_KEY` from its environment — you never pass it as a tool argument or store it in a file. If the server reports `Missing BLUENTE_API_KEY`, the key is not reaching the server process: check the `env` block for typos and restart your client. When testing from a terminal, prefix the server command itself (`BLUENTE_API_KEY=your_api_key_here npx -y @bluente/translate-mcp-server`); in a shell pipeline the assignment must sit directly before `npx` — placed at the start of the line it applies only to the first command in the pipe.
 
 Optional environment variables:
 
