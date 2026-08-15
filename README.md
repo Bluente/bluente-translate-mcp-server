@@ -177,6 +177,23 @@ Add this to your MCP client configuration (Claude Desktop: `claude_desktop_confi
 
 That's it — no clone or install step. Restart your MCP client and the `bluente_*` tools appear.
 
+### Setting your API key
+
+The server reads `BLUENTE_API_KEY` from its environment — you never pass it as a tool argument or store it in a file. How to set it depends on your client:
+
+- **Claude Desktop / Cursor / most MCP clients**: put it in the `env` block of the config JSON, as shown above. The client injects it when launching the server.
+- **Claude Code**: one command does both the install and the key:
+
+  ```bash
+  claude mcp add bluente-translate -e BLUENTE_API_KEY=your_api_key_here -- npx -y @bluente/translate-mcp-server
+  ```
+
+- **Testing from a terminal**: prefix the server command itself, e.g. `BLUENTE_API_KEY=your_api_key_here npx -y @bluente/translate-mcp-server`. (In a shell pipeline, the assignment must sit directly before `npx` — placed at the start of the line it applies only to the first command in the pipe.)
+
+If the server reports `Missing BLUENTE_API_KEY`, the key is not reaching the server process — check for typos in the `env` block and restart your client.
+
+To obtain an API key, see the [Bluente API docs](https://www.bluente.com/docs) or contact your Bluente account manager. Treat the key like a password: it authorizes translations billed to your account, so keep it out of version control and shared documents.
+
 Optional environment variables:
 
 | Variable | Default | Purpose |
