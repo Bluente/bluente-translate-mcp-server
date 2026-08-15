@@ -161,7 +161,17 @@ Requirements: Node.js `>= 20` (check with `node --version`; install from [nodejs
 
 **Getting an API key:** log in at [translate.bluente.com](https://translate.bluente.com) and go to **My Files → API Keys and Webhook**. Treat the key like a password — it authorizes translations billed to your account, so keep it out of version control and shared documents.
 
-### Option 1: Install manually
+### Option 1: Just let your coding agent do it
+
+The fastest way to install: don't. If you use Claude Code, Cursor, or any MCP-capable coding agent, paste this prompt and watch it handle everything — config file, key, verification — in under a minute. Replace `YOUR_KEY_HERE` with your API key:
+
+> Install the Bluente Translate MCP server into this client. It's the npm package `@bluente/translate-mcp-server`, run via `npx -y @bluente/translate-mcp-server` (stdio), and it needs the environment variable `BLUENTE_API_KEY` set in the server config's `env` block. Use `YOUR_KEY_HERE` as the key. After configuring, verify the installation by calling the `bluente_get_supported_languages` tool and show me the result. Docs: https://github.com/Bluente/bluente-translate-mcp-server
+
+The agent finds the right config file for its client, writes the block, and proves the install works by showing you the supported-language list.
+
+Prefer not to paste your API key into an agent conversation? Have the agent use `REPLACE_ME` as the key, then edit the config file by hand and restart your client.
+
+### Option 2: Install manually
 
 **Claude Desktop**
 
@@ -193,16 +203,6 @@ claude mcp add bluente-translate -e BLUENTE_API_KEY=your_api_key_here -- npx -y 
 **Cursor** — Settings → MCP → Add server, or create `.cursor/mcp.json` in your project with the same JSON block as Claude Desktop.
 
 **Smoke test (any client):** ask *"What languages does Bluente translation support?"* — a free, read-only call. A language list back means the key and connection both work. The first run takes a few extra seconds while `npx` downloads the package.
-
-### Option 2: Let your coding agent install it
-
-Already using Claude Code, Cursor, or another MCP-capable coding agent? Paste this prompt, replacing `YOUR_KEY_HERE`:
-
-> Install the Bluente Translate MCP server into this client. It's the npm package `@bluente/translate-mcp-server`, run via `npx -y @bluente/translate-mcp-server` (stdio), and it needs the environment variable `BLUENTE_API_KEY` set in the server config's `env` block. Use `YOUR_KEY_HERE` as the key. After configuring, verify the installation by calling the `bluente_get_supported_languages` tool and show me the result. Docs: https://github.com/Bluente/bluente-translate-mcp-server
-
-The agent finds the right config file for its client, writes the block, and runs the verification.
-
-Prefer not to paste your API key into an agent conversation? Have the agent use `REPLACE_ME` as the key, then edit the config file by hand and restart your client.
 
 ### Troubleshooting the API key
 
