@@ -25,7 +25,8 @@ export function registerTranslateFileTool(server, { client }) {
           customGlossary: args.custom_glossary,
           bilingual: args.bilingual,
           verticalBilingual: args.vertical_bilingual,
-          scanned: args.scanned,
+          scanned: args.mode ?? args.scanned,
+          pageRange: args.page_range,
           namespace: args.namespace,
           metadata: args.metadata
         });

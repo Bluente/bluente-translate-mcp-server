@@ -125,6 +125,11 @@ Tool behavior notes:
 
 - `bluente_translate_file`: `from` and `to` are required when `action="start"` and optional when `action="cancel"`.
 - `bluente_translate_document_workflow`: `status_entry` is configurable (`pdf` or `word`) for status polling.
+- **Language codes**: Bluente uses nonstandard codes (`zh`, `cht`, `jp`, `kor`, `fra`, `spa`, ...). Common ISO spellings (`zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `es`) are auto-aliased; call `bluente_get_supported_languages` for the full list.
+- **`bilingual`**: `on` keeps the original text alongside the translation; `off` (default) produces a clean translated document. `none`/`line`/`paragraph` are accepted as legacy aliases.
+- **`mode`**: `standard` (most digital documents), `scanned (text)` (OCR a scan into a clean text-only document), `scanned (overlay)` (place the translation back over the original scanned layout), or `image` (re-render a graphic like a brochure or poster in the target language; costs more per page). The numeric `scanned` 0–3 flag is a deprecated alias.
+- **`page_range`** (e.g. `"1-3,5"`): translate only selected pages; credits are charged only for those pages.
+- **Glossary**: the workflow tool always translates with the glossary enabled (matching the Bluente web product); its `glossary`/`custom_glossary` arguments are deprecated and ignored. On the raw `bluente_translate_file` tool the backend applies the glossary only when *both* `glossary` and `custom_glossary` are `1`.
 
 Success envelope:
 

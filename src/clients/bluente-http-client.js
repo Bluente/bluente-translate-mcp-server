@@ -2,6 +2,33 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { API_PATHS } from "../constants/api.js";
 import { BluenteApiError } from "../lib/errors.js";
+import { normalizeLanguageCode } from "../lib/language-codes.js";
+
+export function toBilingualParam(value) {
+  if (value === 1 || value === "1") return 1;
+  if (value === 0 || value === "0" || value === "off") return 0;
+  // The API is binary; line/paragraph are legacy aliases for on.
+  if (value === "on" || value === "line" || value === "paragraph") return 1;
+  return 0;
+}
+
+// scanned_option: 0 none, 1 text OCR, 2 overlay, 3 image translation.
+const SCANNED_MODES = {
+  standard: 0,
+  "scanned (text)": 1,
+  "scanned (overlay)": 2,
+  image: 3,
+  // legacy aliases
+  none: 0,
+  text: 1,
+  overlay: 2
+};
+
+export function toScannedParam(value) {
+  if (typeof value === "string" && value in SCANNED_MODES) return SCANNED_MODES[value];
+  const asNumber = Number(value);
+  return Number.isInteger(asNumber) && asNumber >= 0 && asNumber <= 3 ? asNumber : 0;
+}
 
 export class BluenteHttpClient {
   constructor({ apiKey, baseUrl, timeoutMs = 90_000 }) {
@@ -41,15 +68,19 @@ export class BluenteHttpClient {
     const body = {
       id: request.id,
       action: request.action,
-      from: request.from,
-      to: request.to,
+      from: normalizeLanguageCode(request.from),
+      to: normalizeLanguageCode(request.to),
       engine: request.engine,
       glossary: request.glossary,
       custom_glossary: request.customGlossary,
-      bilingual: request.bilingual,
+      bilingual: toBilingualParam(request.bilingual),
       vertical_bilingual: request.verticalBilingual,
-      scanned: request.scanned
+      scanned: toScannedParam(request.scanned)
     };
+
+    if (request.pageRange) {
+      body.page_range = request.pageRange;
+    }
 
     if (request.namespace) {
       body.namespace = request.namespace;

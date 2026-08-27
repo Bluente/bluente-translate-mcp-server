@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [0.3.0] - 2026-08-27
+
+### Changed
+
+- **Bilingual output now defaults to off.** Previously `bilingual` defaulted to `"line"`, so every translation kept the original text alongside the translation unless callers opted out. The flag is now `on`/`off` (default `off`); `none`, `line`, and `paragraph` are accepted as legacy aliases. The API flag is binary — `line` and `paragraph` were never distinct.
+- **Glossary is always on in the workflow tool.** The backend applies the glossary only when both `glossary` and `custom_glossary` are set, so enabling one without the other silently did nothing. `bluente_translate_document_workflow` now sends both flags on every start (matching the web product default) and ignores the deprecated `glossary`/`custom_glossary` arguments. The raw `bluente_translate_file` tool keeps both flags for full control.
+- Supported-languages responses are trimmed to `{code, name}` per language instead of full verbose backend records.
+
+### Added
+
+- **Language-code aliasing.** Bluente uses nonstandard codes (`zh`, `cht`, `jp`, `kor`, `fra`, `spa`); common ISO spellings (`zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `es`, ...) are now auto-mapped case-insensitively. Unknown codes pass through so the backend stays the single validator.
+- **`mode` parameter** with the real four document modes: `standard`, `scanned (text)` (OCR into a clean text-only document), `scanned (overlay)` (translation placed back in the original layout), and `image` (re-render a graphic such as a brochure or poster in the target language; costs more per page). The numeric `scanned` flag remains as a deprecated 0–3 alias — previously it was capped at 0/1, so overlay and image modes were unreachable.
+- **`page_range` parameter** (e.g. `"1-3,5"`) on both translate tools; credits are charged only for the selected pages.
+- Scanned-document detection guidance in the workflow tool description (check for an extractable text layer; ask text-vs-overlay for scans).
+
 ## [0.2.0] - 2026-03-04
 
 ### Added

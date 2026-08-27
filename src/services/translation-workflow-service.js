@@ -13,11 +13,10 @@ export class TranslationWorkflowService {
     to,
     toType,
     engine,
-    glossary,
-    customGlossary,
     bilingual,
     verticalBilingual,
     scanned,
+    pageRange,
     namespace,
     metadata,
     pollIntervalMs,
@@ -26,7 +25,7 @@ export class TranslationWorkflowService {
     statusEntry = "pdf",
     outputPath
   }) {
-    const uploadResult = await this.client.uploadFile({ filePath, engine, glossary });
+    const uploadResult = await this.client.uploadFile({ filePath, engine, glossary: 1 });
     const id = uploadResult?.data?.id;
 
     if (!id) {
@@ -41,11 +40,14 @@ export class TranslationWorkflowService {
       from,
       to,
       engine,
-      glossary,
-      customGlossary,
+      // Glossary is not a user choice: the product defaults it on, and the LLM
+      // pipeline applies it only when BOTH flags are set.
+      glossary: 1,
+      customGlossary: 1,
       bilingual,
       verticalBilingual,
       scanned,
+      pageRange,
       namespace,
       metadata
     });
