@@ -1,14 +1,23 @@
 import { normalizeError } from "./errors.js";
 
 export function toMcpJson(payload) {
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(payload, null, 2)
-      }
-    ]
-  };
+  // A render_to_user string on the data becomes its own leading text content
+  // item (MCP results may carry several). Hosts and models surface a plain
+  // text item far more reliably than a field buried inside the JSON blob,
+  // which is what lets the confirmation card reach the user verbatim.
+  const renderToUser = payload?.data?.render_to_user;
+  const content = [];
+
+  if (typeof renderToUser === "string" && renderToUser.length > 0) {
+    content.push({ type: "text", text: renderToUser });
+  }
+
+  content.push({
+    type: "text",
+    text: JSON.stringify(payload, null, 2)
+  });
+
+  return { content };
 }
 
 export function toMcpError(error, toolName) {

@@ -1,6 +1,143 @@
-import { setTimeout as sleep } from "node:timers/promises";
-import { TERMINAL_TRANSLATION_STATUSES } from "../constants/api.js";
+import { dirname, resolve } from "node:path";
+import { PRE_TRANSLATION_TERMINAL_STATUSES, TERMINAL_TRANSLATION_STATUSES } from "../constants/api.js";
 import { BluenteApiError } from "../lib/errors.js";
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// `budget` is shared across both poll phases so max_poll_attempts bounds total wall clock,
+// not each phase separately.
+async function pollStatusUntilTerminal({ client, id, entry, terminalStatuses, pollIntervalMs, budget }) {
+  let finalStatusPayload = null;
+
+  while (budget.remaining > 0) {
+    budget.remaining -= 1;
+    finalStatusPayload = await client.getTranslationStatus({ id, entry });
+
+    if (terminalStatuses.has(finalStatusPayload?.data?.status)) {
+      break;
+    }
+
+    if (budget.remaining > 0) {
+      await sleep(pollIntervalMs);
+    }
+  }
+
+  return finalStatusPayload;
+}
+
+
+// The confirmation the model shows the user, composed server-side so every host
+// renders the same summary instead of improvising one. Cost is quoted in pages
+// (the backend owns credit pricing); scanned documents may cost more per page.
+// Mirrors the backend's ValidatePageRange: each part must be start>=1, end>=start,
+// end<=pageCount. Throws so the confirmation card never prices an invalid range.
+function assertValidPageRange(pageRange, pageCount) {
+  for (const part of String(pageRange).split(",")) {
+    const nums = part.trim().split("-");
+    const start = Number.parseInt(nums[0], 10);
+    const end = nums.length === 2 ? Number.parseInt(nums[1], 10) : start;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end < start || end > pageCount) {
+      throw new BluenteApiError(
+        `page_range "${pageRange}" is not valid for this ${
+          Number.isFinite(pageCount) ? `${pageCount}-page document` : "document"
+        }.`,
+        { page_range: pageRange, page_count: Number.isFinite(pageCount) ? pageCount : null }
+      );
+    }
+  }
+}
+
+// The bilingual param is binary at heart; line/paragraph are legacy aliases for on.
+function isBilingualOn(bilingual) {
+  return bilingual === "on" || bilingual === "line" || bilingual === "paragraph";
+}
+
+function countRangePages(pageRange) {
+  let total = 0;
+  for (const part of String(pageRange).split(",")) {
+    const nums = part.trim().split("-");
+    const start = Number.parseInt(nums[0], 10);
+    const end = nums.length === 2 ? Number.parseInt(nums[1], 10) : start;
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      total += end - start + 1;
+    }
+  }
+  return total;
+}
+
+function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bilingual, bilingualLayout, scanned, pageRange }) {
+  const formatLabels = { pdf: "PDF", word: "Word", pptx: "PowerPoint" };
+  const layoutLabels = {
+    "left-right": "Left-Right (original and translation side by side)",
+    "top-down": "Top-Down (translation stacked under the original)"
+  };
+  const bilingualLabels = {
+    off: "Off (clean translation)",
+    none: "Off (clean translation)",
+    on: "On (original text kept alongside the translation)",
+    line: "On (original text kept alongside the translation)",
+    paragraph: "On (original text kept alongside the translation)"
+  };
+  const modeLabels = {
+    0: "Standard",
+    standard: "Standard",
+    none: "Standard",
+    1: "Scanned — text (clean text-only document)",
+    text: "Scanned — text (clean text-only document)",
+    "scanned (text)": "Scanned — text (clean text-only document)",
+    2: "Scanned — overlay (translation placed back in the original layout)",
+    overlay: "Scanned — overlay (translation placed back in the original layout)",
+    "scanned (overlay)": "Scanned — overlay (translation placed back in the original layout)",
+    3: "Image (re-render a graphic in the target language; costs more per page)",
+    image: "Image (re-render a graphic in the target language; costs more per page)"
+  };
+  // Server-authored static text (no interpolation, so fence-safe by construction).
+  // A mode nobody chose must read as a decision, not a settled fact: rendering
+  // "Mode: Standard" for a defaulted mode is what once sent a scanned contract
+  // through standard. Only shown on the unconfirmed call, so the digital common
+  // case pays nothing at translate time.
+  const MODE_ASK_LINE =
+    "Mode: (confirm — defaulted to Standard. If this document is a scan (its pages are images of text with no selectable text layer), choose 'scanned (overlay)' to keep the original layout with translation on top, or 'scanned (text)' for a clean OCR'd text document. Standard still OCRs a scan internally but is meant for digital files.)";
+  const totalPages = pageCount ?? "unknown";
+  const pages = pageRange ? countRangePages(pageRange) : totalPages;
+  // Every free-string field is stripped of newlines: this card is wrapped in a
+  // ``` fence the model is told to render verbatim, so a value containing
+  // "\n```" (a document filename, or a prompt-injected from/to language code)
+  // could otherwise close the fence and forge card lines the user would trust.
+  const clean = (value) => String(value).replace(/[\r\n]+/g, " ");
+  const isImageMode = scanned === 3 || scanned === "image";
+  const isScannedMode = scanned && scanned !== "none" && scanned !== "standard" && !isImageMode;
+
+  const lines = [
+    `Document: ${clean(fileName || "uploaded file")} (${totalPages} page${totalPages === 1 ? "" : "s"})`,
+    `Languages: ${clean(from || "auto-detect")} \u2192 ${clean(to || "(ask the user)")}`,
+    `Cost: ${pages} page${pages === 1 ? "" : "s"} of credit${
+      isImageMode
+        ? " (image mode costs more per page)"
+        : isScannedMode
+          ? " (scanned modes may cost more per page)"
+          : ""
+    }`,
+    `Pages: ${pageRange ? `${clean(pageRange)} (${pages} of ${totalPages} pages)` : "All"}`,
+    `Output: ${toTypes.length ? toTypes.map((t) => formatLabels[t] || t).join(" + ") : "(ask the user: PDF, Word, or PowerPoint)"}`,
+    `Bilingual: ${bilingual === undefined || bilingual === null ? "(ask the user)" : bilingualLabels[bilingual] || clean(bilingual)}`,
+    // The layout is a decision only when bilingual is on; an off (or still
+    // unanswered) bilingual gets no layout line at all, so off pays no friction.
+    ...(isBilingualOn(bilingual)
+      ? [
+          bilingualLayout === undefined || bilingualLayout === null
+            ? "Bilingual layout: (confirm — Left-Right side by side, or Top-Down stacked)"
+            : `Bilingual layout: ${layoutLabels[bilingualLayout] || clean(bilingualLayout)}`
+        ]
+      : []),
+    // undefined means neither mode nor the deprecated scanned arg was passed:
+    // that is a defaulted mode, rendered as an ask; an explicit value (even
+    // "standard") renders the settled label.
+    scanned === undefined || scanned === null ? MODE_ASK_LINE : `Mode: ${modeLabels[scanned] ?? "Standard"}`
+  ];
+
+  return lines.join("\n");
+}
 
 export class TranslationWorkflowService {
   constructor({ client }) {
@@ -8,12 +145,17 @@ export class TranslationWorkflowService {
   }
 
   async runDocumentWorkflow({
+    taskId,
+    fileUrl,
     filePath,
+    fileBuffer,
+    fileName,
     from,
     to,
     toType,
     engine,
     bilingual,
+    bilingualLayout,
     verticalBilingual,
     scanned,
     pageRange,
@@ -22,68 +164,261 @@ export class TranslationWorkflowService {
     pollIntervalMs,
     maxPollAttempts,
     autoDownload,
-    statusEntry = "pdf",
-    outputPath
+    confirmed,
+    outputPath,
+    statusEntry = "get_status"
   }) {
-    const uploadResult = await this.client.uploadFile({ filePath, engine, glossary: 1 });
-    const id = uploadResult?.data?.id;
+    void statusEntry;
 
-    if (!id) {
-      throw new BluenteApiError("Upload completed but no task id was returned.", {
-        uploadResult
-      });
-    }
+    // The deprecated numeric vertical_bilingual (an explicit 0/1 from a stale
+    // session) still counts as a chosen layout; bilingual_layout wins when both
+    // are given. Undefined stays undefined so the gate and card can tell
+    // "nobody chose" from "chose left-right".
+    const layout =
+      bilingualLayout ??
+      (verticalBilingual === undefined || verticalBilingual === null
+        ? undefined
+        : Number(verticalBilingual) === 1
+          ? "top-down"
+          : "left-right");
 
-    await this.client.translateFile({
-      id,
-      action: "start",
-      from,
-      to,
-      engine,
-      // Glossary is not a user choice: the product defaults it on, and the LLM
-      // pipeline applies it only when BOTH flags are set.
-      glossary: 1,
-      customGlossary: 1,
-      bilingual,
-      verticalBilingual,
-      scanned,
-      pageRange,
-      namespace,
-      metadata
-    });
-
-    let finalStatusPayload = null;
-
-    for (let i = 0; i < maxPollAttempts; i += 1) {
-      const statusPayload = await this.client.getTranslationStatus({ id, entry: statusEntry });
-      finalStatusPayload = statusPayload;
-      const status = statusPayload?.data?.status;
-
-      if (TERMINAL_TRANSLATION_STATUSES.has(status)) {
-        break;
+    // The confirm gate: starting deducts credits, so these must be explicit user
+    // choices, never schema or model defaults. Checked before any network call.
+    if (confirmed) {
+      // task_id only ever comes from a prior unconfirmed call (or the upload
+      // endpoint), so requiring it makes the two-call flow structurally
+      // unbypassable: no model can start a translation on its first call, even
+      // a fully specified one. The user must have seen the page count.
+      if (!taskId) {
+        throw new BluenteApiError(
+          "confirmed=true requires task_id from a prior unconfirmed call. First call this tool without confirmed to get the page count and settings for the user to review, then call again with the returned task_id and confirmed=true. Nothing was started.",
+          { missing_settings: ["task_id"] }
+        );
       }
 
-      await sleep(pollIntervalMs);
+      const missing = [
+        ["to", to],
+        ["to_type", toType],
+        ["bilingual", bilingual],
+        // The layout is a Tier-1 choice only when bilingual is on: without it a
+        // bilingual user silently got left-right. Off needs no layout at all.
+        ...(isBilingualOn(bilingual) ? [["bilingual_layout", layout]] : [])
+      ]
+        .filter(([, value]) => value === undefined)
+        .map(([name]) => name);
+
+      if (missing.length > 0) {
+        throw new BluenteApiError(
+          `confirmed=true requires explicit values for: ${missing.join(", ")}. Ask the user for these choices, then call again with them set. Nothing was started.`,
+          { missing_settings: missing }
+        );
+      }
     }
 
-    const finalStatus = finalStatusPayload?.data?.status;
-    if (finalStatus !== "READY") {
-      throw new BluenteApiError("Translation job did not reach READY state.", {
-        id,
-        finalStatus,
-        finalStatusPayload
+    // Formats are download-time conversions of one finished translation, so
+    // to_type may be a single format or an array of them (no extra credits).
+    const toTypes = toType === undefined ? [] : [...new Set([].concat(toType))];
+
+    // A task_id from the side-channel upload endpoint means the file is already
+    // uploaded; the workflow then only polls readiness and starts translation.
+    let id = taskId;
+    if (!id) {
+      const uploadResult = await this.client.uploadFile({
+        fileUrl,
+        filePath,
+        fileBuffer,
+        fileName,
+        engine,
+        glossary: 1
       });
+      id = uploadResult?.data?.id;
+
+      if (!id) {
+        throw new BluenteApiError("Upload completed but no task id was returned.", {
+          uploadResult
+        });
+      }
     }
 
-    const download = autoDownload
-      ? await this.client.downloadFile({ id, toType, outputPath })
-      : null;
+    const budget = { remaining: maxPollAttempts };
 
-    return {
-      id,
-      finalStatus,
-      status: finalStatusPayload,
-      download
-    };
+    try {
+      const preTranslationStatusPayload = await pollStatusUntilTerminal({
+        client: this.client,
+        id,
+        entry: "get_page_count",
+        terminalStatuses: PRE_TRANSLATION_TERMINAL_STATUSES,
+        pollIntervalMs,
+        budget
+      });
+      const preTranslationStatus = preTranslationStatusPayload?.data?.status;
+
+      if (preTranslationStatus !== "SERVICE_PROCESSED") {
+        throw new BluenteApiError("Uploaded file did not become ready for translation.", {
+          id,
+          finalStatus: preTranslationStatus,
+          finalStatusPayload: preTranslationStatusPayload,
+        });
+      }
+
+      if (!confirmed) {
+        const pageCount =
+          preTranslationStatusPayload?.data?.pageCount ??
+          preTranslationStatusPayload?.data?.page_count ??
+          null;
+        // Validate the range now, mirroring the backend's ValidatePageRange, so
+        // the card never quotes a negative or out-of-bounds cost the confirmed
+        // call would only reject. Infinity when the page count is unknown still
+        // catches start<1 and descending ranges, which are the ones that misprice.
+        if (pageRange) {
+          assertValidPageRange(pageRange, typeof pageCount === "number" ? pageCount : Infinity);
+        }
+        const confirmationSummary = buildConfirmationSummary({
+          fileName,
+          pageCount,
+          from,
+          to,
+          toTypes,
+          bilingual,
+          bilingualLayout: layout,
+          scanned,
+          pageRange
+        });
+
+        return {
+          task_id: id,
+          page_count: pageCount,
+          started: false,
+          confirmation_summary: confirmationSummary,
+          // Also emitted as the tool result's leading text content item (see
+          // toMcpJson): a fenced block the model pastes whole, so the user sees
+          // the exact cost card instead of a paraphrase.
+          render_to_user: [
+            "Paste the fenced block below into your reply to the user EXACTLY as-is:",
+            "",
+            "```",
+            confirmationSummary,
+            "```",
+            "",
+            "Then ask the user to confirm or adjust (and to answer any (ask the user) and (confirm ...) lines). Do not call this tool with confirmed=true until the user has replied."
+          ].join("\n"),
+          settings: {
+            from: from ?? null,
+            to: to ?? null,
+            to_type: toType ?? null,
+            bilingual: bilingual ?? null,
+            bilingual_layout: layout ?? null,
+            vertical_bilingual: verticalBilingual ?? null,
+            mode: scanned ?? null,
+            page_range: pageRange ?? null
+          },
+          next_steps:
+            "Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line. Ask the user for any (ask the user) values, ask them to confirm or adjust, and wait for their reply. Only after the user has replied to that message, call this tool again with this task_id, confirmed=true, and the final settings (to, to_type, and bilingual must be explicit; when bilingual is on, bilingual_layout too)."
+        };
+      }
+
+      const translateResult = await this.client.translateFile({
+        id,
+        action: "start",
+        from,
+        to,
+        engine,
+        // Glossary is not a user choice: the product defaults it on, and the LLM
+        // pipeline applies it only when BOTH flags are set.
+        glossary: 1,
+        customGlossary: 1,
+        bilingual,
+        bilingualLayout: layout,
+        verticalBilingual,
+        scanned,
+        pageRange,
+        namespace,
+        metadata
+      });
+
+      const started = {
+        id,
+        started: true,
+        translate_result: translateResult,
+      };
+
+      if (!autoDownload) {
+        return {
+          ...started,
+          downloaded: false,
+          next_steps:
+            "Poll bluente_get_translation_status with this id until data.status is READY, then call bluente_download_file once per requested to_type with this id.",
+          message: "Translation task has started."
+        };
+      }
+
+      // ponytail: blocks the MCP request until translation finishes. Client-side HTTP
+      // timeouts are usually tighter than max_poll_attempts, so callers who cannot wait
+      // should pass auto_download=false and poll with bluente_get_translation_status.
+      const finalStatusPayload = await pollStatusUntilTerminal({
+        client: this.client,
+        id,
+        entry: "get_status",
+        terminalStatuses: TERMINAL_TRANSLATION_STATUSES,
+        pollIntervalMs,
+        budget
+      });
+      const finalStatus = finalStatusPayload?.data?.status;
+
+      if (finalStatus === "ERROR") {
+        throw new BluenteApiError("Translation failed.", {
+          id,
+          finalStatus,
+          finalStatusPayload,
+        });
+      }
+
+      if (finalStatus !== "READY") {
+        return {
+          ...started,
+          downloaded: false,
+          final_status: finalStatus ?? null,
+          message:
+            "Translation is still running after the polling budget was exhausted. Keep polling bluente_get_translation_status with this id, and call bluente_download_file once the status is READY."
+        };
+      }
+
+      // Every requested format is fetched and saved: they are download-time
+      // conversions of one finished translation, so extra formats cost nothing.
+      // output_path names the first; the rest keep their own names beside it,
+      // rather than scattering into whatever cwd the MCP client launched us in.
+      const outputDir = outputPath ? dirname(resolve(outputPath)) : undefined;
+      const downloads = [];
+      for (const [index, requestedType] of toTypes.entries()) {
+        downloads.push({
+          to_type: requestedType,
+          ...(await this.client.downloadFile({
+            id,
+            toType: requestedType,
+            outputPath: index === 0 ? outputPath : undefined,
+            outputDir
+          }))
+        });
+      }
+
+      return {
+        ...started,
+        downloaded: true,
+        final_status: "READY",
+        download: downloads[0],
+        downloads,
+        next_steps: "Tell the user where each file was saved (the output_path of every entry in downloads).",
+        message: "Translation is complete and the file has been saved to disk."
+      };
+    } catch (error) {
+      if (error instanceof BluenteApiError) {
+        error.details = {
+          ...(error.details || {}),
+          id,
+        };
+      }
+
+      throw error;
+    }
   }
 }

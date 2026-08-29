@@ -13,10 +13,12 @@ export function trimLanguageRecord(entry) {
 }
 
 export function registerGetSupportedLanguagesTool(server, { client }) {
-  server.tool(
+  server.registerTool(
     TOOL_NAME,
-    "List all language pairs currently supported by the Bluente translation platform.",
-    {},
+    {
+      description: "List all language pairs currently supported by the Bluente translation platform.",
+      inputSchema: {}
+    },
     async () =>
       executeTool(TOOL_NAME, async () => {
         const payload = await client.getSupportedLanguages();

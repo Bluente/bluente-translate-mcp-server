@@ -121,12 +121,20 @@ Reference: [Bluente API Docs](https://www.bluente.com/docs)
 - `bluente_download_file`
 - `bluente_translate_document_workflow`
 
+These match the tools exposed by Bluente's hosted MCP server, so a prompt or
+agent written against one works against the other. The differences are the two
+things only a local server can do: `file_path` as a source, and `output_path`
+for saving results to disk (the hosted server hands out download links instead).
+
 Tool behavior notes:
 
+- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count` plus a confirmation card for the user; **nothing starts and no credits are deducted**. Call again with the returned `task_id`, `confirmed=true`, and explicit `to`, `to_type`, and `bilingual` values to actually start. `bluente_translate_file` has no gate and starts immediately.
+- **File sources**: `file_path` (a file on this machine), `file_url` (a public link), or `file_content_base64` (under 2MB).
 - `bluente_translate_file`: `from` and `to` are required when `action="start"` and optional when `action="cancel"`.
-- `bluente_translate_document_workflow`: `status_entry` is configurable (`pdf` or `word`) for status polling.
+- **`to_type`**: `pdf`, `word`, or `pptx`. The workflow tool also accepts an array (e.g. `["word", "pdf"]`) — extra formats are download-time conversions of the same translation and cost no extra credits.
+- **`entry` / `status_entry`**: `get_status` (translation progress, the default) or `get_page_count` (the uploaded file's page count).
 - **Language codes**: Bluente uses nonstandard codes (`zh`, `cht`, `jp`, `kor`, `fra`, `spa`, ...). Common ISO spellings (`zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `es`) are auto-aliased; call `bluente_get_supported_languages` for the full list.
-- **`bilingual`**: `on` keeps the original text alongside the translation; `off` (default) produces a clean translated document. `none`/`line`/`paragraph` are accepted as legacy aliases.
+- **`bilingual`**: `on` keeps the original text alongside the translation; `off` (default) produces a clean translated document. When `on`, set **`bilingual_layout`** to `left-right` (side by side) or `top-down` (stacked) — these are the only two layouts Bluente supports. The numeric `vertical_bilingual` flag is a deprecated alias.
 - **`mode`**: `standard` (most digital documents), `scanned (text)` (OCR a scan into a clean text-only document), `scanned (overlay)` (place the translation back over the original scanned layout), or `image` (re-render a graphic like a brochure or poster in the target language; costs more per page). The numeric `scanned` 0–3 flag is a deprecated alias.
 - **`page_range`** (e.g. `"1-3,5"`): translate only selected pages; credits are charged only for those pages.
 - **Glossary**: the workflow tool always translates with the glossary enabled (matching the Bluente web product); its `glossary`/`custom_glossary` arguments are deprecated and ignored. On the raw `bluente_translate_file` tool the backend applies the glossary only when *both* `glossary` and `custom_glossary` are `1`.
@@ -237,8 +245,9 @@ To point an MCP client at your local checkout, use `"command": "node"` with `"ar
 
 ## Operational Notes
 
-- Workflow tool polls until terminal state (`READY` or `ERROR`).
-- Output download can be disabled with `auto_download=false`.
+- The workflow tool returns as soon as translation starts. Poll `bluente_get_translation_status` until `READY`, then call `bluente_download_file`.
+- `auto_download=true` instead blocks until the translation finishes and saves the file(s) to disk. Only safe for small documents — translation often takes minutes and your MCP client may time the request out first.
+- `max_poll_attempts` is a single budget shared across the upload and translation phases.
 - Timeout is configurable via `BLUENTE_API_TIMEOUT_MS`.
 - For production, use separate API keys per environment.
 

@@ -4,11 +4,16 @@ import { downloadFileSchema } from "./schemas.js";
 const TOOL_NAME = "bluente_download_file";
 
 export function registerDownloadFileTool(server, { client }) {
-  server.tool(
+  server.registerTool(
     TOOL_NAME,
-    "Download the translated file once the task status is READY.",
-    downloadFileSchema,
-    async ({ id, to_type: toType, output_path: outputPath }) =>
-      executeTool(TOOL_NAME, async () => client.downloadFile({ id, toType, outputPath }))
+    {
+      description:
+        "Download the translated document (the translation result file) once the task status is READY. Use to_type=pdf, word, or pptx. The file is saved to output_path (or the current directory) and the result reports where; set include_file_content=true to also receive base64 content, which is refused over 2MB.",
+      inputSchema: downloadFileSchema
+    },
+    async ({ id, to_type: toType, output_path: outputPath, include_file_content: includeFileContent }) =>
+      executeTool(TOOL_NAME, async () =>
+        client.downloadFile({ id, toType, outputPath, includeFileContent })
+      )
   );
 }
