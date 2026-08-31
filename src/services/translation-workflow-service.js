@@ -28,7 +28,9 @@ async function pollStatusUntilTerminal({ client, id, entry, terminalStatuses, po
 
 // The confirmation the model shows the user, composed server-side so every host
 // renders the same summary instead of improvising one. Cost is quoted in pages
-// (the backend owns credit pricing); scanned documents may cost more per page.
+// (the backend owns credit pricing). Only image mode is charged above 1 credit
+// per page: backend effectiveDeductPages multiplies it by 5 and leaves every
+// other mode, both scanned modes included, at 1x.
 // Mirrors the backend's ValidatePageRange: each part must be start>=1, end>=start,
 // end<=pageCount. Throws so the confirmation card never prices an invalid range.
 function assertValidPageRange(pageRange, pageCount) {
@@ -88,8 +90,8 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
     2: "Scanned — overlay (translation placed back in the original layout)",
     overlay: "Scanned — overlay (translation placed back in the original layout)",
     "scanned (overlay)": "Scanned — overlay (translation placed back in the original layout)",
-    3: "Image (re-render a graphic in the target language; costs more per page)",
-    image: "Image (re-render a graphic in the target language; costs more per page)"
+    3: "Image (re-render a graphic in the target language; 5 credits per page)",
+    image: "Image (re-render a graphic in the target language; 5 credits per page)"
   };
   // Server-authored static text (no interpolation, so fence-safe by construction).
   // A mode nobody chose must read as a decision, not a settled fact: rendering
@@ -106,17 +108,15 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
   // could otherwise close the fence and forge card lines the user would trust.
   const clean = (value) => String(value).replace(/[\r\n]+/g, " ");
   const isImageMode = scanned === 3 || scanned === "image";
-  const isScannedMode = scanned && scanned !== "none" && scanned !== "standard" && !isImageMode;
+  // Backend effectiveDeductPages: image translation is charged pages x 5, and
+  // every other mode -- both scanned modes included -- is charged pages x 1.
+  const credits = isImageMode && typeof pages === "number" ? pages * 5 : pages;
 
   const lines = [
     `Document: ${clean(fileName || "uploaded file")} (${totalPages} page${totalPages === 1 ? "" : "s"})`,
     `Languages: ${clean(from || "auto-detect")} \u2192 ${clean(to || "(ask the user)")}`,
-    `Cost: ${pages} page${pages === 1 ? "" : "s"} of credit${
-      isImageMode
-        ? " (image mode costs more per page)"
-        : isScannedMode
-          ? " (scanned modes may cost more per page)"
-          : ""
+    `Cost: ${credits} page${credits === 1 ? "" : "s"} of credit${
+      isImageMode ? ` (image mode: 5 per page for ${pages} page${pages === 1 ? "" : "s"})` : ""
     }`,
     `Pages: ${pageRange ? `${clean(pageRange)} (${pages} of ${totalPages} pages)` : "All"}`,
     `Output: ${toTypes.length ? toTypes.map((t) => formatLabels[t] || t).join(" + ") : "(ask the user: PDF, Word, or PowerPoint)"}`,

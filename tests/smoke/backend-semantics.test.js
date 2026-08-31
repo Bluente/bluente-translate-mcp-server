@@ -268,6 +268,19 @@ test("a page_range beyond the document is rejected before it is priced", async (
   assert.match(ok.confirmation_summary, /Cost: 3 pages/);
 });
 
+test("only image mode is priced above 1 credit per page", async () => {
+  // Backend effectiveDeductPages: pages x 5 for image translation, pages x 1 for
+  // everything else. The card used to warn that scanned modes cost extra (they
+  // do not) and quoted image mode unmultiplied (billed 5x what it showed).
+  const service = new TranslationWorkflowService({ client: fakeClient({ pageCount: 3 }) });
+
+  const scan = await service.runDocumentWorkflow({ ...baseArgs, scanned: "scanned (overlay)" });
+  assert.match(scan.confirmation_summary, /Cost: 3 pages of credit\n/);
+
+  const image = await service.runDocumentWorkflow({ ...baseArgs, scanned: "image" });
+  assert.match(image.confirmation_summary, /Cost: 15 pages of credit \(image mode: 5 per page for 3 pages\)/);
+});
+
 test("auto_download saves every requested format", async () => {
   const client = fakeClient();
   const result = await new TranslationWorkflowService({ client }).runDocumentWorkflow({

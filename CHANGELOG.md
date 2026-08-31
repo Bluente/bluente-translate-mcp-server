@@ -40,7 +40,7 @@ differences are the two things a local server can do that a hosted one cannot:
 ### Added
 
 - **Language-code aliasing.** Bluente uses nonstandard codes (`zh`, `cht`, `jp`, `kor`, `fra`, `spa`); common ISO spellings (`zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `es`, ...) are now auto-mapped case-insensitively. Unknown codes pass through so the backend stays the single validator.
-- **`mode` parameter** with the real four document modes: `standard`, `scanned (text)` (OCR into a clean text-only document), `scanned (overlay)` (translation placed back in the original layout), and `image` (re-render a graphic such as a brochure or poster in the target language; costs more per page). The numeric `scanned` flag remains as a deprecated 0–3 alias — previously it was capped at 0/1, so overlay and image modes were unreachable.
+- **`mode` parameter** with the real four document modes: `standard`, `scanned (text)` (OCR into a clean text-only document), `scanned (overlay)` (translation placed back in the original layout), and `image` (re-render a graphic such as a brochure or poster in the target language; charged 5 credits per page). The numeric `scanned` flag remains as a deprecated 0–3 alias — previously it was capped at 0/1, so overlay and image modes were unreachable.
 - **`page_range` parameter** (e.g. `"1-3,5"`) on both translate tools; credits are charged only for the selected pages.
 - Scanned-document detection guidance in the workflow tool description (check for an extractable text layer; ask text-vs-overlay for scans).
 
