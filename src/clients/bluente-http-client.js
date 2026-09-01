@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { API_PATHS } from "../constants/api.js";
 import { BluenteApiError } from "../lib/errors.js";
@@ -16,7 +17,14 @@ function inferFilename(fileUrl) {
   }
 }
 
-function parseContentDispositionFileName(contentDisposition) {
+// The server picks this name from the source document, so it is untrusted:
+// only a bare file name survives, never a directory component.
+function safeFileName(name) {
+  const base = path.basename(name.replace(/[\x00-\x1f\x7f]/g, ""));
+  return base && base !== "." && base !== ".." ? base : null;
+}
+
+export function parseContentDispositionFileName(contentDisposition) {
   if (!contentDisposition) {
     return null;
   }
@@ -24,14 +32,34 @@ function parseContentDispositionFileName(contentDisposition) {
   const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf8Match?.[1]) {
     try {
-      return decodeURIComponent(utf8Match[1]);
+      return safeFileName(decodeURIComponent(utf8Match[1]));
     } catch {
-      return utf8Match[1];
+      return safeFileName(utf8Match[1]);
     }
   }
 
   const basicMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
-  return basicMatch?.[1] || null;
+  return basicMatch?.[1] ? safeFileName(basicMatch[1]) : null;
+}
+
+function defaultOutputDir() {
+  return process.env.BLUENTE_OUTPUT_DIR || path.join(os.homedir(), "Downloads", "bluente");
+}
+
+// Never clobbers: "wx" fails if the path exists, so a translated file can not
+// overwrite something the user already had there.
+export async function writeNewFile(filePath, data) {
+  try {
+    await fs.writeFile(filePath, data, { flag: "wx" });
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new BluenteApiError(
+        `A file already exists at ${filePath}; it was not overwritten. Pass a different output_path.`,
+        { output_path: filePath }
+      );
+    }
+    throw error;
+  }
 }
 
 // The API takes a numeric task id; hosts routinely hand ids back as strings.
@@ -264,9 +292,17 @@ export class BluenteHttpClient {
     }
 
     // Unlike the hosted server, which hands out signed links, this one runs on
-    // the user's machine and simply saves the file where they can open it.
-    const resolvedPath = path.resolve(outputPath || path.join(outputDir || process.cwd(), fileName));
-    await fs.writeFile(resolvedPath, outputBuffer);
+    // the user's machine and simply saves the file where they can open it. The
+    // default is a Downloads folder, not whatever cwd the MCP host launched us in.
+    let resolvedPath;
+    if (outputPath) {
+      resolvedPath = path.resolve(outputPath);
+    } else {
+      const dir = outputDir || defaultOutputDir();
+      await fs.mkdir(dir, { recursive: true });
+      resolvedPath = path.resolve(dir, fileName);
+    }
+    await writeNewFile(resolvedPath, outputBuffer);
 
     return {
       translate_id: String(id),

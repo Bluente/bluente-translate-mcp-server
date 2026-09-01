@@ -115,7 +115,7 @@ export const downloadFileSchema = {
   output_path: z
     .string()
     .optional()
-    .describe("Where to save the file on this machine. Defaults to the returned file name in the current directory."),
+    .describe("Where to save the file on this machine. Defaults to the returned file name under BLUENTE_OUTPUT_DIR, else ~/Downloads/bluente. An existing file is never overwritten."),
   include_file_content: includeFileContentSchema
 };
 
@@ -195,6 +195,6 @@ export const documentWorkflowSchema = {
   output_path: z
     .string()
     .optional()
-    .describe("Where to save the file when auto_download is true. Defaults to the current directory."),
+    .describe("Where to save the file when auto_download is true. Defaults to BLUENTE_OUTPUT_DIR, else ~/Downloads/bluente. An existing file is never overwritten."),
   status_entry: z.enum(["get_page_count", "get_status"]).default("get_status")
 };

@@ -228,6 +228,7 @@ Optional environment variables:
 | `BLUENTE_API_KEY` | (required) | Your Bluente API key |
 | `BLUENTE_API_BASE_URL` | `https://api.bluente.com/api/20250924` | API base URL |
 | `BLUENTE_API_TIMEOUT_MS` | `90000` | HTTP timeout in milliseconds |
+| `BLUENTE_OUTPUT_DIR` | `~/Downloads/bluente` | Where downloads are saved when no `output_path` is given |
 
 ## Local Development
 
@@ -253,7 +254,7 @@ To point an MCP client at your local checkout, use `"command": "node"` with `"ar
 ## Data Handling & Privacy
 
 - **Documents you translate are uploaded to Bluente's API** (`api.bluente.com` by default) for processing. Do not translate documents you are not permitted to send to a third-party service.
-- **The AI model controls the tools.** When run locally (stdio), `file_path` lets the model read any file your user account can read and upload it to Bluente, and `output_path` lets it write downloaded files to any writable path. Review tool calls in your MCP client before approving them, especially when working with untrusted documents — a malicious document could try to instruct the model to misuse these tools.
+- **The AI model controls the tools.** When run locally (stdio), `file_path` lets the model read any file your user account can read and upload it to Bluente, and `output_path` lets it write downloaded files to any writable path (existing files are never overwritten; without `output_path` files go to `BLUENTE_OUTPUT_DIR` or `~/Downloads/bluente`, and the server-supplied file name is reduced to a bare basename). Review tool calls in your MCP client before approving them, especially when working with untrusted documents — a malicious document could try to instruct the model to misuse these tools.
 - Translated output returned by tools (file contents, status payloads) enters your AI client's context and is therefore visible to your LLM provider.
 - Your API key stays on your machine: it is read from the environment and sent only as an `Authorization` header to the configured Bluente API base URL. It is never logged or included in tool responses. The server never reads a `.env` file from the working directory (a workspace opened in your editor cannot redirect the key), `BLUENTE_API_BASE_URL` must be `https://`, and a non-`bluente.com` host is flagged with a warning at startup.
 
