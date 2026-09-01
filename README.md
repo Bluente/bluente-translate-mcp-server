@@ -60,7 +60,7 @@ This repository is maintained by **Bluente** and is part of Bluente's public dev
 - Modular Node.js MCP server with clear layering (`config`, `client`, `service`, `tools`)
 - One-file-per-tool implementation for maintainability
 - Unified tool response envelope (`ok/tool/data` and structured errors)
-- End-to-end translation workflow tool (upload -> start -> poll -> download)
+- End-to-end translation workflow tool (upload -> confirm -> start -> poll -> download)
 - CI checks and local smoke tests
 
 ## Architecture
@@ -124,20 +124,22 @@ Reference: [Bluente API Docs](https://www.bluente.com/docs)
 These match the tools exposed by Bluente's hosted MCP server, so a prompt or
 agent written against one works against the other. The differences are the two
 things only a local server can do: `file_path` as a source, and `output_path`
-for saving results to disk (the hosted server hands out download links instead).
+for saving results to disk (the hosted server hands out download links instead)
+— plus `bluente_translate_file`, which here can only cancel a task (starting
+goes through the workflow tool's confirmation gate).
 
 Tool behavior notes:
 
-- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count` plus a confirmation card for the user; **nothing starts and no credits are deducted**. Call again with the returned `task_id`, `confirmed=true`, and explicit `to`, `to_type`, and `bilingual` values to actually start. `bluente_translate_file` has no gate and starts immediately.
+- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count`, a confirmation card for the user, and a `confirm_token`; **nothing starts and no credits are deducted**. After the user confirms, call again with the returned `task_id`, `confirm_token`, `confirmed=true`, and the settings the card showed, filling in any it asked for (`to`, `to_type`, and `bilingual` explicit; `mode` may only be filled in as `standard`) to actually start. The server enforces the gate: a confirmed call is refused without a matching token, for 20 seconds after the card was issued, if a setting the card displayed differs, or once the token has been used or is older than 15 minutes. The token is consumed only when the translation actually starts, so a failed start can be retried with it; a fresh card for the same task revokes the earlier token. Tokens live in the server process's memory. There is no other way to start a translation.
 - **File sources**: `file_path` (a file on this machine), `file_url` (a public link), or `file_content_base64` (under 2MB).
-- `bluente_translate_file`: `from` and `to` are required when `action="start"` and optional when `action="cancel"`.
+- `bluente_translate_file` only cancels a task (`action="cancel"`); it cannot start one.
 - **`to_type`**: `pdf`, `word`, or `pptx`. The workflow tool also accepts an array (e.g. `["word", "pdf"]`) — extra formats are download-time conversions of the same translation and cost no extra credits.
 - **`entry` / `status_entry`**: `get_status` (translation progress, the default) or `get_page_count` (the uploaded file's page count).
 - **Language codes**: Bluente uses nonstandard codes (`zh`, `cht`, `jp`, `kor`, `fra`, `spa`, ...). Common ISO spellings (`zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `es`) are auto-aliased; call `bluente_get_supported_languages` for the full list.
 - **`bilingual`**: `on` keeps the original text alongside the translation; `off` (default) produces a clean translated document. When `on`, set **`bilingual_layout`** to `left-right` (side by side) or `top-down` (stacked) — these are the only two layouts Bluente supports. The numeric `vertical_bilingual` flag is a deprecated alias.
 - **`mode`**: `standard` (most digital documents), `scanned (text)` (OCR a scan into a clean text-only document), `scanned (overlay)` (place the translation back over the original scanned layout), or `image` (re-render a graphic like a brochure or poster in the target language; 5 credits per page — the only mode charged above the standard rate, scanned modes cost the same as standard). The numeric `scanned` 0–3 flag is a deprecated alias.
 - **`page_range`** (e.g. `"1-3,5"`): translate only selected pages; credits are charged only for those pages.
-- **Glossary**: the workflow tool always translates with the glossary enabled (matching the Bluente web product); its `glossary`/`custom_glossary` arguments are deprecated and ignored. On the raw `bluente_translate_file` tool the backend applies the glossary only when *both* `glossary` and `custom_glossary` are `1`.
+- **Glossary**: the workflow tool always translates with the glossary enabled (matching the Bluente web product); its `glossary`/`custom_glossary` arguments are deprecated and ignored.
 
 Success envelope:
 
@@ -228,6 +230,7 @@ Optional environment variables:
 | `BLUENTE_API_KEY` | (required) | Your Bluente API key |
 | `BLUENTE_API_BASE_URL` | `https://api.bluente.com/api/20250924` | API base URL |
 | `BLUENTE_API_TIMEOUT_MS` | `90000` | HTTP timeout in milliseconds |
+| `BLUENTE_OUTPUT_DIR` | `~/Downloads/bluente` | Where downloads are saved when no `output_path` is given |
 
 ## Local Development
 
@@ -235,8 +238,7 @@ Optional environment variables:
 git clone https://github.com/bluente/bluente-translate-mcp-server.git
 cd bluente-translate-mcp-server
 npm install
-cp .env.example .env   # then set BLUENTE_API_KEY
-npm start              # run the server on stdio
+BLUENTE_API_KEY=... npm start   # run the server on stdio (no .env file is read)
 npm run check          # syntax check
 npm test               # run tests
 ```
@@ -247,16 +249,16 @@ To point an MCP client at your local checkout, use `"command": "node"` with `"ar
 
 - The workflow tool returns as soon as translation starts. Poll `bluente_get_translation_status` until `READY`, then call `bluente_download_file`.
 - `auto_download=true` instead blocks until the translation finishes and saves the file(s) to disk. Only safe for small documents — translation often takes minutes and your MCP client may time the request out first.
-- `max_poll_attempts` is a single budget shared across the upload and translation phases.
+- `max_poll_attempts` is a single budget shared across the upload and translation phases — at most 100 polls, at least 2 s apart (default 100 × 3 s).
 - Timeout is configurable via `BLUENTE_API_TIMEOUT_MS`.
 - For production, use separate API keys per environment.
 
 ## Data Handling & Privacy
 
 - **Documents you translate are uploaded to Bluente's API** (`api.bluente.com` by default) for processing. Do not translate documents you are not permitted to send to a third-party service.
-- **The AI model controls the tools.** When run locally (stdio), `file_path` lets the model read any file your user account can read and upload it to Bluente, and `output_path` lets it write downloaded files to any writable path. Review tool calls in your MCP client before approving them, especially when working with untrusted documents — a malicious document could try to instruct the model to misuse these tools.
+- **The AI model controls the tools.** When run locally (stdio), `file_path` lets the model read any file your user account can read and upload it to Bluente, and `output_path` lets it write downloaded files to any writable path (existing files are never overwritten; without `output_path` files go to `BLUENTE_OUTPUT_DIR` or `~/Downloads/bluente`, and the server-supplied file name is reduced to a bare basename). Review tool calls in your MCP client before approving them, especially when working with untrusted documents — a malicious document could try to instruct the model to misuse these tools.
 - Translated output returned by tools (file contents, status payloads) enters your AI client's context and is therefore visible to your LLM provider.
-- Your API key stays on your machine: it is read from the environment and sent only as an `Authorization` header to the configured Bluente API base URL. It is never logged or included in tool responses.
+- Your API key stays on your machine: it is read from the environment and sent only as an `Authorization` header to the configured Bluente API base URL. It is never logged or included in tool responses. The server never reads a `.env` file from the working directory (a workspace opened in your editor cannot redirect the key), `BLUENTE_API_BASE_URL` must be `https://`, and a non-`bluente.com` host is flagged with a warning at startup.
 
 ## Security
 

@@ -1,8 +1,3 @@
-# Default owner: Bluente GitHub organization.
-* @Bluente
-
-# Suggested ownership split
-/src/clients/ @Bluente
-/src/services/ @Bluente
-/src/tools/ @Bluente
-/.github/ @Bluente
+# Repository admins. An org name (@Bluente) is not a valid owner and silently
+# never requested review; individual admins do.
+* @lilien1010 @varSmallRookie @DaphneTayYL

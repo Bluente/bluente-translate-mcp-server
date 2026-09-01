@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { API_PATHS } from "../constants/api.js";
 import { BluenteApiError } from "../lib/errors.js";
@@ -16,7 +17,34 @@ function inferFilename(fileUrl) {
   }
 }
 
-function parseContentDispositionFileName(contentDisposition) {
+// File names come from the source document (upload) or the server (download),
+// so they are untrusted: only a bare name survives, never a directory
+// component (win32.basename splits on both / and \), no control, bidi-override
+// or Windows-reserved characters, no runs of whitespace, and nothing past
+// maxLength characters (the stem is cut, the extension is kept). The upload
+// name passes Infinity: the backend reads the real extension off it.
+export function safeFileName(name, maxLength = 80) {
+  const base = path.win32
+    .basename(String(name).replace(/[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069<>:"|?*]/g, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!base || base === "." || base === "..") return null;
+  if (Array.from(base).length <= maxLength) return base;
+  const ext = path.extname(base).length <= 10 ? path.extname(base) : "";
+  const stem = Array.from(base.slice(0, base.length - ext.length));
+  return `${stem.slice(0, maxLength - 1 - ext.length).join("")}\u2026${ext}`;
+}
+
+// Backend free text (error messages, raw payloads) is shown to the model, so it
+// is clipped: an upstream error page must not become a page of instructions.
+export const MAX_BACKEND_TEXT_CHARS = 500;
+export function clipBackendText(value) {
+  if (value === undefined || value === null) return undefined;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text.length > MAX_BACKEND_TEXT_CHARS ? `${text.slice(0, MAX_BACKEND_TEXT_CHARS)}\u2026` : text;
+}
+
+export function parseContentDispositionFileName(contentDisposition, maxLength) {
   if (!contentDisposition) {
     return null;
   }
@@ -24,14 +52,41 @@ function parseContentDispositionFileName(contentDisposition) {
   const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf8Match?.[1]) {
     try {
-      return decodeURIComponent(utf8Match[1]);
+      return safeFileName(decodeURIComponent(utf8Match[1]), maxLength);
     } catch {
-      return utf8Match[1];
+      return safeFileName(utf8Match[1], maxLength);
     }
   }
 
   const basicMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
-  return basicMatch?.[1] || null;
+  return basicMatch?.[1] ? safeFileName(basicMatch[1], maxLength) : null;
+}
+
+// Hosts pass paths through verbatim, so a leading ~ never reaches the shell.
+export function expandHome(p) {
+  return p.replace(/^~(?=$|[\\/])/, os.homedir());
+}
+
+function defaultOutputDir() {
+  return process.env.BLUENTE_OUTPUT_DIR
+    ? expandHome(process.env.BLUENTE_OUTPUT_DIR)
+    : path.join(os.homedir(), "Downloads", "bluente");
+}
+
+// Never clobbers: "wx" fails if the path exists, so a translated file can not
+// overwrite something the user already had there.
+export async function writeNewFile(filePath, data) {
+  try {
+    await fs.writeFile(filePath, data, { flag: "wx" });
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new BluenteApiError(
+        `A file already exists at ${filePath}; it was not overwritten. Pass a different output_path.`,
+        { output_path: filePath }
+      );
+    }
+    throw error;
+  }
 }
 
 // The API takes a numeric task id; hosts routinely hand ids back as strings.
@@ -118,7 +173,7 @@ async function readFileFromUrl({ fileUrl, fileName }) {
   const fileBuffer = await fileResponse.arrayBuffer();
   const resolvedFileName =
     fileName ||
-    parseContentDispositionFileName(fileResponse.headers.get("content-disposition")) ||
+    parseContentDispositionFileName(fileResponse.headers.get("content-disposition"), Infinity) ||
     inferFilename(fileUrl);
 
   return { fileBuffer, resolvedFileName };
@@ -246,7 +301,7 @@ export class BluenteHttpClient {
       this.assertBluenteSuccess(payload, API_PATHS.DOWNLOAD_FILE);
       throw new BluenteApiError("Unexpected JSON payload returned for file download.", {
         apiPath: API_PATHS.DOWNLOAD_FILE,
-        payload
+        backend_payload: clipBackendText(payload)
       });
     }
 
@@ -264,9 +319,21 @@ export class BluenteHttpClient {
     }
 
     // Unlike the hosted server, which hands out signed links, this one runs on
-    // the user's machine and simply saves the file where they can open it.
-    const resolvedPath = path.resolve(outputPath || path.join(outputDir || process.cwd(), fileName));
-    await fs.writeFile(resolvedPath, outputBuffer);
+    // the user's machine and simply saves the file where they can open it. The
+    // default is a Downloads folder, not whatever cwd the MCP host launched us in.
+    let resolvedPath;
+    if (outputPath) {
+      resolvedPath = path.resolve(expandHome(outputPath));
+      // An output_path that names an existing directory means "save it in here".
+      if ((await fs.stat(resolvedPath).catch(() => null))?.isDirectory()) {
+        resolvedPath = path.join(resolvedPath, fileName);
+      }
+    } else {
+      const dir = outputDir ? expandHome(outputDir) : defaultOutputDir();
+      await fs.mkdir(dir, { recursive: true });
+      resolvedPath = path.resolve(dir, fileName);
+    }
+    await writeNewFile(resolvedPath, outputBuffer);
 
     return {
       translate_id: String(id),
@@ -315,7 +382,7 @@ export class BluenteHttpClient {
           apiPath,
           status: response.status,
           statusText: response.statusText,
-          responseText
+          backend_message: clipBackendText(responseText)
         });
       }
 
@@ -338,8 +405,8 @@ export class BluenteHttpClient {
       throw new BluenteApiError("Bluente API returned a non-success result.", {
         apiPath,
         code: payload?.code,
-        message: payload?.message,
-        payload
+        backend_message: clipBackendText(payload?.message),
+        backend_payload: clipBackendText(payload)
       });
     }
   }

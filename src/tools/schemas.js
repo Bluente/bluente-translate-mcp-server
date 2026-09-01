@@ -84,29 +84,11 @@ export const getStatusSchema = {
   entry: z.enum(["get_page_count", "get_status"]).default("get_status")
 };
 
+// Cancel only. Starting is deliberately not offered here: it deducts credits
+// and must go through the workflow tool's confirmation gate.
 export const translateFileSchema = {
-  id: z.string().min(1),
-  action: z.enum(["start", "cancel"]).default("start"),
-  from: z.string().min(2).optional().describe(LANGUAGE_CODE_DESCRIPTION),
-  to: z.string().min(2).optional().describe(LANGUAGE_CODE_DESCRIPTION),
-  engine: engineSchema,
-  glossary: binaryFlagSchema.default(0),
-  custom_glossary: binaryFlagSchema.default(0),
-  bilingual: z.enum(["line", "paragraph", "none"]).default("none"),
-  vertical_bilingual: binaryFlagSchema.default(0),
-  bilingual_layout: bilingualLayoutSchema.describe(
-    "Bilingual page layout: 'left-right' side by side, 'top-down' stacked. Wins over vertical_bilingual when both are given."
-  ),
-  scanned: z
-    .number()
-    .int()
-    .min(0)
-    .max(3)
-    .default(0)
-    .describe("scanned_option: 0 none, 1 text OCR, 2 overlay, 3 image translation."),
-  page_range: z.string().optional().describe("Pages to translate, e.g. '1-3,5'; whole document when omitted."),
-  namespace: z.string().optional(),
-  metadata: z.record(z.any()).optional()
+  id: z.string().min(1).describe("Task id to cancel."),
+  action: z.enum(["cancel"]).default("cancel")
 };
 
 export const downloadFileSchema = {
@@ -115,7 +97,7 @@ export const downloadFileSchema = {
   output_path: z
     .string()
     .optional()
-    .describe("Where to save the file on this machine. Defaults to the returned file name in the current directory."),
+    .describe("Where to save the file on this machine. Defaults to the returned file name under BLUENTE_OUTPUT_DIR, else ~/Downloads/bluente. An existing file is never overwritten."),
   include_file_content: includeFileContentSchema
 };
 
@@ -174,18 +156,25 @@ export const documentWorkflowSchema = {
     .boolean()
     .default(false)
     .describe(
-      "Set true only after the user has seen the page_count and settings returned by a first call and explicitly confirmed them. While false (the default) the call stops after returning page_count and settings: nothing starts and no credits are deducted."
+      "Set true only after the user has seen the confirmation card returned by a first call and replied confirming it. Requires task_id, confirm_token, and the settings the card showed (filling in any it asked for). While false (the default) the call stops after returning the card: nothing starts and no credits are deducted."
+    ),
+  confirm_token: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "The confirm_token returned by the unconfirmed call whose card the user confirmed. Required when confirmed=true; single-use; refused for 20 seconds after the card was issued and after 15 minutes."
     ),
   namespace: z.string().optional(),
   metadata: z.record(z.any()).optional(),
-  poll_interval_ms: z.number().int().min(500).max(60_000).default(DEFAULT_POLL_INTERVAL_MS),
+  poll_interval_ms: z.number().int().min(2_000).max(60_000).default(DEFAULT_POLL_INTERVAL_MS),
   max_poll_attempts: z
     .number()
     .int()
     .min(1)
-    .max(2_000)
+    .max(100)
     .default(DEFAULT_MAX_POLL_ATTEMPTS)
-    .describe("Total status polls allowed across both the upload and translation phases."),
+    .describe("Total status polls allowed across both the upload and translation phases (max 100, at least 2 s apart)."),
   auto_download: z
     .boolean()
     .default(false)
@@ -195,6 +184,6 @@ export const documentWorkflowSchema = {
   output_path: z
     .string()
     .optional()
-    .describe("Where to save the file when auto_download is true. Defaults to the current directory."),
+    .describe("Where to save the file when auto_download is true. Defaults to BLUENTE_OUTPUT_DIR, else ~/Downloads/bluente. An existing file is never overwritten."),
   status_entry: z.enum(["get_page_count", "get_status"]).default("get_status")
 };

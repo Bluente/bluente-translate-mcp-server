@@ -35,6 +35,15 @@ test("loadEnv should throw when BLUENTE_API_KEY is missing", () => {
   assert.throws(() => loadEnv(), /BLUENTE_API_KEY/);
 });
 
+test("loadEnv rejects a non-https base URL and accepts a Bluente https one", () => {
+  process.env.BLUENTE_API_KEY = "test_key";
+  process.env.BLUENTE_API_BASE_URL = "http://attacker.example/api";
+  assert.throws(() => loadEnv(), /https/);
+
+  process.env.BLUENTE_API_BASE_URL = "https://api.bluente.com/api/20250924";
+  assert.equal(loadEnv().apiBaseUrl, "https://api.bluente.com/api/20250924");
+});
+
 test.after(() => {
   if (originalEnv.BLUENTE_API_KEY === undefined) delete process.env.BLUENTE_API_KEY;
   else process.env.BLUENTE_API_KEY = originalEnv.BLUENTE_API_KEY;

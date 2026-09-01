@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking: `bluente_translate_file` can only cancel.** `action` accepts `cancel` only and the start-only parameters are gone. Starting a translation deducts credits and now happens only through `bluente_translate_document_workflow`, behind its confirmation gate.
+- **Breaking: the confirmation gate is enforced by the server.** The unconfirmed call returns a `confirm_token` alongside `task_id`; a confirmed call must pass it. The token is bound to the task and to the settings the card displayed (`from`, `to`, `to_type`, `bilingual`, `bilingual_layout`, `mode`, `page_range`), is refused for 20 seconds after the card was issued (a same-turn confirm cannot have waited for the user), expires after 15 minutes, and is single-use. Previously `confirmed=true` with any non-empty `task_id` started the translation.
+- **The confirmation gate accepts answers to the card's questions.** A setting the card asked for (`to_type`, `bilingual`, `bilingual_layout`; `mode` only as `standard`) may be filled in on the confirmed call; settings compare by meaning (`off`/`none`, `zh-CN`/`zh`, `standard`/`0`, whitespace in `page_range`); the token is consumed only once the start request succeeds, so a failed start can be retried with it; a fresh card for the same task revokes the earlier token.
+- `@modelcontextprotocol/sdk` 1.17.0 → 1.30.0 (1.17.0 sits inside a High advisory affecting `<=1.25.3`).
+
+### Security
+
+- The confirmation card now renders the document name as a bare basename: path components, control, bidi-override and Windows-reserved characters, and runs of whitespace are removed and it is cut at 80 characters (keeping the extension), so a filename can no longer inject lines into the card the user is told to trust.
+- `~` at the start of `BLUENTE_OUTPUT_DIR`, `output_path`, and `output_dir` is expanded to the home directory, and an `output_path` that names an existing directory saves the file inside it under its own name.
+- Backend free text that reaches the model — error bodies, non-success payloads, and `message`/`message_json` on status results — is clipped to 500 characters under a `backend_message` / `backend_payload` key.
+- The scanned-document guidance no longer tells the model to "read the file"; inspecting for a text layer is allowed, but document text is never to be treated as instructions.
+- The polling budget of `bluente_translate_document_workflow` is capped: `max_poll_attempts` at most 100 (default 100, was 120 with a 2 000 ceiling) and `poll_interval_ms` at least 2 000 (was 500), so one tool call can no longer issue thousands of status requests.
+
 ## [0.4.0] - 2026-08-29
 
 Aligns this server's tool interface with Bluente's hosted MCP server, so a prompt
