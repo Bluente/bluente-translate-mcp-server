@@ -47,6 +47,20 @@ If you add behavior that touches API flows, include a short manual validation no
   - Risk/rollback notes
   - Validation evidence
 
+## Releasing
+
+Publishing to npm is done by CI, not from a laptop:
+
+1. Bump `version` in `package.json` (and `src/server.js`), update `CHANGELOG.md`, merge to `main`.
+2. Tag the merge commit and push the tag: `git tag v1.2.3 && git push origin v1.2.3`.
+3. `.github/workflows/release.yml` runs `npm ci`, `npm test`, then
+   `npm publish --provenance` via npm trusted publishing (GitHub OIDC). No npm
+   token is stored in the repository.
+
+One-time setup by an npm maintainer: on npmjs.com, open the package's
+Settings → Trusted publishers and add this repository with workflow file
+`release.yml`. Until that exists the publish step fails with a 404/403.
+
 ## Reporting Issues
 
 Please include:

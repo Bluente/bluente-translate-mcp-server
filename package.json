@@ -36,8 +36,8 @@
   "homepage": "https://www.bluente.com/translator",
   "bugs": "https://github.com/Bluente/bluente-translate-mcp-server/issues",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.0",
-    "zod": "^3.25.76"
+    "@modelcontextprotocol/sdk": "1.17.0",
+    "zod": "3.25.76"
   },
   "engines": {
     "node": ">=20.0.0"
