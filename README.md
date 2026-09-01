@@ -60,7 +60,7 @@ This repository is maintained by **Bluente** and is part of Bluente's public dev
 - Modular Node.js MCP server with clear layering (`config`, `client`, `service`, `tools`)
 - One-file-per-tool implementation for maintainability
 - Unified tool response envelope (`ok/tool/data` and structured errors)
-- End-to-end translation workflow tool (upload -> start -> poll -> download)
+- End-to-end translation workflow tool (upload -> confirm -> start -> poll -> download)
 - CI checks and local smoke tests
 
 ## Architecture
@@ -128,16 +128,16 @@ for saving results to disk (the hosted server hands out download links instead).
 
 Tool behavior notes:
 
-- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count` plus a confirmation card for the user; **nothing starts and no credits are deducted**. Call again with the returned `task_id`, `confirmed=true`, and explicit `to`, `to_type`, and `bilingual` values to actually start. `bluente_translate_file` has no gate and starts immediately.
+- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count`, a confirmation card for the user, and a `confirm_token`; **nothing starts and no credits are deducted**. After the user confirms, call again with the returned `task_id`, `confirm_token`, `confirmed=true`, and the same settings the card showed (`to`, `to_type`, and `bilingual` explicit) to actually start. The server enforces the gate: a confirmed call is refused without a matching token, for 20 seconds after the card was issued, if any setting differs from the card, or once the token has been used or is older than 15 minutes. Tokens live in the server process's memory. There is no other way to start a translation.
 - **File sources**: `file_path` (a file on this machine), `file_url` (a public link), or `file_content_base64` (under 2MB).
-- `bluente_translate_file`: `from` and `to` are required when `action="start"` and optional when `action="cancel"`.
+- `bluente_translate_file` only cancels a task (`action="cancel"`); it cannot start one.
 - **`to_type`**: `pdf`, `word`, or `pptx`. The workflow tool also accepts an array (e.g. `["word", "pdf"]`) — extra formats are download-time conversions of the same translation and cost no extra credits.
 - **`entry` / `status_entry`**: `get_status` (translation progress, the default) or `get_page_count` (the uploaded file's page count).
 - **Language codes**: Bluente uses nonstandard codes (`zh`, `cht`, `jp`, `kor`, `fra`, `spa`, ...). Common ISO spellings (`zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `es`) are auto-aliased; call `bluente_get_supported_languages` for the full list.
 - **`bilingual`**: `on` keeps the original text alongside the translation; `off` (default) produces a clean translated document. When `on`, set **`bilingual_layout`** to `left-right` (side by side) or `top-down` (stacked) — these are the only two layouts Bluente supports. The numeric `vertical_bilingual` flag is a deprecated alias.
 - **`mode`**: `standard` (most digital documents), `scanned (text)` (OCR a scan into a clean text-only document), `scanned (overlay)` (place the translation back over the original scanned layout), or `image` (re-render a graphic like a brochure or poster in the target language; 5 credits per page — the only mode charged above the standard rate, scanned modes cost the same as standard). The numeric `scanned` 0–3 flag is a deprecated alias.
 - **`page_range`** (e.g. `"1-3,5"`): translate only selected pages; credits are charged only for those pages.
-- **Glossary**: the workflow tool always translates with the glossary enabled (matching the Bluente web product); its `glossary`/`custom_glossary` arguments are deprecated and ignored. On the raw `bluente_translate_file` tool the backend applies the glossary only when *both* `glossary` and `custom_glossary` are `1`.
+- **Glossary**: the workflow tool always translates with the glossary enabled (matching the Bluente web product); its `glossary`/`custom_glossary` arguments are deprecated and ignored.
 
 Success envelope:
 

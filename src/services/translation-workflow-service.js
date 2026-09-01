@@ -1,6 +1,75 @@
+import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { PRE_TRANSLATION_TERMINAL_STATUSES, TERMINAL_TRANSLATION_STATUSES } from "../constants/api.js";
+import { clipBackendText, safeFileName } from "../clients/bluente-http-client.js";
 import { BluenteApiError } from "../lib/errors.js";
+
+// The confirm token ties a confirmed call to the card the user actually saw.
+// notBefore is a heuristic: a model cannot have shown the card and received a
+// reply within 20 s of minting, so an earlier confirmed call is a same-turn
+// bypass, not a confirmation. It does not prove the user replied.
+const CONFIRM_NOT_BEFORE_MS = 20_000;
+const CONFIRM_TTL_MS = 15 * 60_000;
+// ponytail: in-memory, process-local by design. This is a single-user STDIO
+// server, so a Map is the whole store and tokens die with the process; move to
+// the backend if the hosted server ever needs the same gate.
+const confirmTokens = new Map();
+
+// The settings the card displayed, in a shape that compares with ===.
+function bindSettings({ from, to, toTypes, bilingual, layout, scanned, pageRange }) {
+  return JSON.stringify({
+    from: from ?? null,
+    to: to ?? null,
+    to_type: [...toTypes].sort(),
+    bilingual: bilingual ?? null,
+    bilingual_layout: layout ?? null,
+    mode: scanned ?? null,
+    page_range: pageRange ?? null
+  });
+}
+
+function mintConfirmToken({ taskId, settings, now }) {
+  for (const [token, entry] of confirmTokens) {
+    if (entry.expires <= now) confirmTokens.delete(token);
+  }
+  const token = randomBytes(16).toString("hex");
+  confirmTokens.set(token, {
+    taskId: String(taskId),
+    settings,
+    notBefore: now + CONFIRM_NOT_BEFORE_MS,
+    expires: now + CONFIRM_TTL_MS
+  });
+  return token;
+}
+
+// Throws unless the token was minted for this task with these settings and is
+// old enough for a user to have replied. Consumed on success (single-use).
+function consumeConfirmToken({ token, taskId, settings, now }) {
+  const entry = token ? confirmTokens.get(token) : undefined;
+  if (!entry || entry.expires <= now) {
+    confirmTokens.delete(token);
+    throw new BluenteApiError(
+      "confirmed=true requires a valid confirm_token: make the unconfirmed call first to get a confirmation card, show it to the user, and pass the returned confirm_token. Nothing was started."
+    );
+  }
+  if (entry.taskId !== String(taskId)) {
+    throw new BluenteApiError(
+      "confirm_token was issued for a different task_id. Call again without confirmed to get a new confirmation card. Nothing was started."
+    );
+  }
+  if (entry.settings !== settings) {
+    throw new BluenteApiError(
+      "settings changed since the confirmation card; call again without confirmed to get a new card for the user to review. Nothing was started."
+    );
+  }
+  if (now < entry.notBefore) {
+    throw new BluenteApiError(
+      "confirmation card was shown less than 20 seconds ago; wait for the user's reply, then call again with the same confirm_token. Nothing was started.",
+      { retry_after_ms: entry.notBefore - now }
+    );
+  }
+  confirmTokens.delete(token);
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -106,14 +175,17 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
   // ``` fence the model is told to render verbatim, so a value containing
   // "\n```" (a document filename, or a prompt-injected from/to language code)
   // could otherwise close the fence and forge card lines the user would trust.
+  // The filename comes from the document itself, so it also loses path parts,
+  // control characters, and anything past 80 chars.
   const clean = (value) => String(value).replace(/[\r\n]+/g, " ");
+  const documentName = safeFileName(fileName || "") || "uploaded file";
   const isImageMode = scanned === 3 || scanned === "image";
   // Backend effectiveDeductPages: image translation is charged pages x 5, and
   // every other mode -- both scanned modes included -- is charged pages x 1.
   const credits = isImageMode && typeof pages === "number" ? pages * 5 : pages;
 
   const lines = [
-    `Document: ${clean(fileName || "uploaded file")} (${totalPages} page${totalPages === 1 ? "" : "s"})`,
+    `Document: ${documentName} (${totalPages} page${totalPages === 1 ? "" : "s"})`,
     `Languages: ${clean(from || "auto-detect")} \u2192 ${clean(to || "(ask the user)")}`,
     `Cost: ${credits} page${credits === 1 ? "" : "s"} of credit${
       isImageMode ? ` (image mode: 5 per page for ${pages} page${pages === 1 ? "" : "s"})` : ""
@@ -140,8 +212,10 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
 }
 
 export class TranslationWorkflowService {
-  constructor({ client }) {
+  // `now` is injectable so tests can move the confirm-token clock.
+  constructor({ client, now = Date.now }) {
     this.client = client;
+    this.now = now;
   }
 
   async runDocumentWorkflow({
@@ -165,6 +239,7 @@ export class TranslationWorkflowService {
     maxPollAttempts,
     autoDownload,
     confirmed,
+    confirmToken,
     outputPath,
     statusEntry = "get_status"
   }) {
@@ -182,13 +257,16 @@ export class TranslationWorkflowService {
           ? "top-down"
           : "left-right");
 
+    // Formats are download-time conversions of one finished translation, so
+    // to_type may be a single format or an array of them (no extra credits).
+    const toTypes = toType === undefined ? [] : [...new Set([].concat(toType))];
+    const boundSettings = bindSettings({ from, to, toTypes, bilingual, layout, scanned, pageRange });
+
     // The confirm gate: starting deducts credits, so these must be explicit user
     // choices, never schema or model defaults. Checked before any network call.
     if (confirmed) {
-      // task_id only ever comes from a prior unconfirmed call (or the upload
-      // endpoint), so requiring it makes the two-call flow structurally
-      // unbypassable: no model can start a translation on its first call, even
-      // a fully specified one. The user must have seen the page count.
+      // task_id alone proves nothing (a model can invent one); the confirm_token
+      // check below is what ties this call to a card the user was shown.
       if (!taskId) {
         throw new BluenteApiError(
           "confirmed=true requires task_id from a prior unconfirmed call. First call this tool without confirmed to get the page count and settings for the user to review, then call again with the returned task_id and confirmed=true. Nothing was started.",
@@ -213,11 +291,9 @@ export class TranslationWorkflowService {
           { missing_settings: missing }
         );
       }
-    }
 
-    // Formats are download-time conversions of one finished translation, so
-    // to_type may be a single format or an array of them (no extra credits).
-    const toTypes = toType === undefined ? [] : [...new Set([].concat(toType))];
+      consumeConfirmToken({ token: confirmToken, taskId, settings: boundSettings, now: this.now() });
+    }
 
     // A task_id from the side-channel upload endpoint means the file is already
     // uploaded; the workflow then only polls readiness and starts translation.
@@ -235,7 +311,7 @@ export class TranslationWorkflowService {
 
       if (!id) {
         throw new BluenteApiError("Upload completed but no task id was returned.", {
-          uploadResult
+          backend_payload: clipBackendText(uploadResult)
         });
       }
     }
@@ -257,7 +333,7 @@ export class TranslationWorkflowService {
         throw new BluenteApiError("Uploaded file did not become ready for translation.", {
           id,
           finalStatus: preTranslationStatus,
-          finalStatusPayload: preTranslationStatusPayload,
+          backend_message: clipBackendText(preTranslationStatusPayload?.data?.message ?? preTranslationStatusPayload?.message)
         });
       }
 
@@ -287,6 +363,7 @@ export class TranslationWorkflowService {
 
         return {
           task_id: id,
+          confirm_token: mintConfirmToken({ taskId: id, settings: boundSettings, now: this.now() }),
           page_count: pageCount,
           started: false,
           confirmation_summary: confirmationSummary,
@@ -300,7 +377,7 @@ export class TranslationWorkflowService {
             confirmationSummary,
             "```",
             "",
-            "Then ask the user to confirm or adjust (and to answer any (ask the user) and (confirm ...) lines). Do not call this tool with confirmed=true until the user has replied."
+            "Then ask the user to confirm or adjust (and to answer any (ask the user) and (confirm ...) lines). Stop and wait for the user's reply before calling this tool again."
           ].join("\n"),
           settings: {
             from: from ?? null,
@@ -313,7 +390,7 @@ export class TranslationWorkflowService {
             page_range: pageRange ?? null
           },
           next_steps:
-            "Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line. Ask the user for any (ask the user) values, ask them to confirm or adjust, and wait for their reply. Only after the user has replied to that message, call this tool again with this task_id, confirmed=true, and the final settings (to, to_type, and bilingual must be explicit; when bilingual is on, bilingual_layout too)."
+            "Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line — then end your turn and wait for the user's reply. After they confirm, call this tool again with confirmed=true, this task_id, this confirm_token, and exactly the settings shown on the card. If the user changes or fills in any setting, call again WITHOUT confirmed to get a fresh card and confirm_token. A confirmed call is refused for at least 20 seconds after the card, and confirm_token is single-use."
         };
       }
 
@@ -369,7 +446,7 @@ export class TranslationWorkflowService {
         throw new BluenteApiError("Translation failed.", {
           id,
           finalStatus,
-          finalStatusPayload,
+          backend_message: clipBackendText(finalStatusPayload?.data?.message ?? finalStatusPayload?.message)
         });
       }
 

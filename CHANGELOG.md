@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking: `bluente_translate_file` can only cancel.** `action` accepts `cancel` only and the start-only parameters are gone. Starting a translation deducts credits and now happens only through `bluente_translate_document_workflow`, behind its confirmation gate.
+- **Breaking: the confirmation gate is enforced by the server.** The unconfirmed call returns a `confirm_token` alongside `task_id`; a confirmed call must pass it. The token is bound to the task and to the settings the card displayed (`from`, `to`, `to_type`, `bilingual`, `bilingual_layout`, `mode`, `page_range`), is refused for 20 seconds after the card was issued (a same-turn confirm cannot have waited for the user), expires after 15 minutes, and is single-use. Previously `confirmed=true` with any non-empty `task_id` started the translation.
+
+### Security
+
+- The confirmation card now renders the document name as a bare basename: path components, control characters, and runs of whitespace are removed and it is cut at 80 characters, so a filename can no longer inject lines into the card the user is told to trust.
+- Backend free text that reaches the model — error bodies, non-success payloads, and `message`/`message_json` on status results — is clipped to 500 characters under a `backend_message` / `backend_payload` key.
+- The scanned-document guidance no longer tells the model to "read the file"; inspecting for a text layer is allowed, but document text is never to be treated as instructions.
+
 ## [0.4.0] - 2026-08-29
 
 Aligns this server's tool interface with Bluente's hosted MCP server, so a prompt

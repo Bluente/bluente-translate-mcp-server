@@ -17,11 +17,26 @@ function inferFilename(fileUrl) {
   }
 }
 
-// The server picks this name from the source document, so it is untrusted:
-// only a bare file name survives, never a directory component.
-function safeFileName(name) {
-  const base = path.basename(name.replace(/[\x00-\x1f\x7f]/g, ""));
-  return base && base !== "." && base !== ".." ? base : null;
+// File names come from the source document (upload) or the server (download),
+// so they are untrusted: only a bare name survives, never a directory
+// component (win32.basename splits on both / and \), no control characters,
+// no runs of whitespace, and nothing past 80 characters.
+export function safeFileName(name) {
+  const base = path.win32
+    .basename(String(name).replace(/[\x00-\x1f\x7f]/g, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!base || base === "." || base === "..") return null;
+  return base.length > 80 ? `${base.slice(0, 79)}\u2026` : base;
+}
+
+// Backend free text (error messages, raw payloads) is shown to the model, so it
+// is clipped: an upstream error page must not become a page of instructions.
+export const MAX_BACKEND_TEXT_CHARS = 500;
+export function clipBackendText(value) {
+  if (value === undefined || value === null) return undefined;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text.length > MAX_BACKEND_TEXT_CHARS ? `${text.slice(0, MAX_BACKEND_TEXT_CHARS)}\u2026` : text;
 }
 
 export function parseContentDispositionFileName(contentDisposition) {
@@ -274,7 +289,7 @@ export class BluenteHttpClient {
       this.assertBluenteSuccess(payload, API_PATHS.DOWNLOAD_FILE);
       throw new BluenteApiError("Unexpected JSON payload returned for file download.", {
         apiPath: API_PATHS.DOWNLOAD_FILE,
-        payload
+        backend_payload: clipBackendText(payload)
       });
     }
 
@@ -351,7 +366,7 @@ export class BluenteHttpClient {
           apiPath,
           status: response.status,
           statusText: response.statusText,
-          responseText
+          backend_message: clipBackendText(responseText)
         });
       }
 
@@ -374,8 +389,8 @@ export class BluenteHttpClient {
       throw new BluenteApiError("Bluente API returned a non-success result.", {
         apiPath,
         code: payload?.code,
-        message: payload?.message,
-        payload
+        backend_message: clipBackendText(payload?.message),
+        backend_payload: clipBackendText(payload)
       });
     }
   }

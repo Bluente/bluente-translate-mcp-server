@@ -156,7 +156,14 @@ export const documentWorkflowSchema = {
     .boolean()
     .default(false)
     .describe(
-      "Set true only after the user has seen the page_count and settings returned by a first call and explicitly confirmed them. While false (the default) the call stops after returning page_count and settings: nothing starts and no credits are deducted."
+      "Set true only after the user has seen the confirmation card returned by a first call and replied confirming it. Requires task_id, confirm_token, and the same settings the card showed. While false (the default) the call stops after returning the card: nothing starts and no credits are deducted."
+    ),
+  confirm_token: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "The confirm_token returned by the unconfirmed call whose card the user confirmed. Required when confirmed=true; single-use; refused for 20 seconds after the card was issued and after 15 minutes."
     ),
   namespace: z.string().optional(),
   metadata: z.record(z.any()).optional(),

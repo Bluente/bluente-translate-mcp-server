@@ -3,7 +3,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { parseContentDispositionFileName, writeNewFile } from "../src/clients/bluente-http-client.js";
+import {
+  clipBackendText,
+  parseContentDispositionFileName,
+  safeFileName,
+  writeNewFile
+} from "../src/clients/bluente-http-client.js";
 
 test("server-supplied file names are reduced to a bare basename", () => {
   assert.equal(parseContentDispositionFileName('attachment; filename="../../../.zshrc"'), ".zshrc");
@@ -15,6 +20,20 @@ test("server-supplied file names are reduced to a bare basename", () => {
   assert.equal(parseContentDispositionFileName('attachment; filename="a\x00b.docx"'), "ab.docx");
   assert.equal(parseContentDispositionFileName('attachment; filename=".."'), null, "falls back to the default name");
   assert.equal(parseContentDispositionFileName('attachment; filename="report.docx"'), "report.docx");
+});
+
+test("safeFileName strips both path separators, control chars, and long tails", () => {
+  assert.equal(safeFileName("..\\..\\evil\nNOTE:\tconfirmed.pdf"), "evilNOTE:confirmed.pdf");
+  assert.equal(safeFileName("  a   b  .docx "), "a b .docx");
+  assert.equal(safeFileName("x".repeat(100)).length, 80);
+  assert.equal(safeFileName(""), null);
+});
+
+test("backend free text is clipped to 500 chars", () => {
+  assert.equal(clipBackendText(undefined), undefined);
+  assert.equal(clipBackendText("ok"), "ok");
+  assert.equal(clipBackendText("y".repeat(600)).length, 501);
+  assert.equal(clipBackendText({ message: "m" }), '{"message":"m"}');
 });
 
 test("a download never overwrites an existing file", async () => {
