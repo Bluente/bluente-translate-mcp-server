@@ -16,6 +16,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - The confirmation card now renders the document name as a bare basename: path components, control characters, and runs of whitespace are removed and it is cut at 80 characters, so a filename can no longer inject lines into the card the user is told to trust.
 - Backend free text that reaches the model — error bodies, non-success payloads, and `message`/`message_json` on status results — is clipped to 500 characters under a `backend_message` / `backend_payload` key.
 - The scanned-document guidance no longer tells the model to "read the file"; inspecting for a text layer is allowed, but document text is never to be treated as instructions.
+- The polling budget of `bluente_translate_document_workflow` is capped: `max_poll_attempts` at most 100 (default 100, was 120 with a 2 000 ceiling) and `poll_interval_ms` at least 2 000 (was 500), so one tool call can no longer issue thousands of status requests.
 
 ## [0.4.0] - 2026-08-29
 

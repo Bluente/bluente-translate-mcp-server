@@ -80,6 +80,13 @@ test("workflow schema leaves the confirm-gated settings undefaulted", () => {
   assert.throws(() => documentWorkflowSchema.to_type.parse("docx"));
 });
 
+test("workflow schema caps the polling budget at 100 attempts / 2 s interval", () => {
+  assert.equal(documentWorkflowSchema.max_poll_attempts.parse(undefined), 100);
+  assert.equal(documentWorkflowSchema.poll_interval_ms.parse(undefined), 3000);
+  assert.throws(() => documentWorkflowSchema.max_poll_attempts.parse(101));
+  assert.throws(() => documentWorkflowSchema.poll_interval_ms.parse(1999));
+});
+
 test("status and download schemas use the hosted vocabulary", () => {
   assert.equal(getStatusSchema.entry.parse(undefined), "get_status");
   assert.equal(getStatusSchema.entry.parse("get_page_count"), "get_page_count");

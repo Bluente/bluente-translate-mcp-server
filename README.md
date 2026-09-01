@@ -247,7 +247,7 @@ To point an MCP client at your local checkout, use `"command": "node"` with `"ar
 
 - The workflow tool returns as soon as translation starts. Poll `bluente_get_translation_status` until `READY`, then call `bluente_download_file`.
 - `auto_download=true` instead blocks until the translation finishes and saves the file(s) to disk. Only safe for small documents — translation often takes minutes and your MCP client may time the request out first.
-- `max_poll_attempts` is a single budget shared across the upload and translation phases.
+- `max_poll_attempts` is a single budget shared across the upload and translation phases — at most 100 polls, at least 2 s apart (default 100 × 3 s).
 - Timeout is configurable via `BLUENTE_API_TIMEOUT_MS`.
 - For production, use separate API keys per environment.
 

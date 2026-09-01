@@ -167,14 +167,14 @@ export const documentWorkflowSchema = {
     ),
   namespace: z.string().optional(),
   metadata: z.record(z.any()).optional(),
-  poll_interval_ms: z.number().int().min(500).max(60_000).default(DEFAULT_POLL_INTERVAL_MS),
+  poll_interval_ms: z.number().int().min(2_000).max(60_000).default(DEFAULT_POLL_INTERVAL_MS),
   max_poll_attempts: z
     .number()
     .int()
     .min(1)
-    .max(2_000)
+    .max(100)
     .default(DEFAULT_MAX_POLL_ATTEMPTS)
-    .describe("Total status polls allowed across both the upload and translation phases."),
+    .describe("Total status polls allowed across both the upload and translation phases (max 100, at least 2 s apart)."),
   auto_download: z
     .boolean()
     .default(false)
