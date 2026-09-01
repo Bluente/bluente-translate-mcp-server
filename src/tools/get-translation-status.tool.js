@@ -19,7 +19,7 @@ export function registerGetTranslationStatusTool(server, { client }) {
         // OCR/translation errors, can quote the document): clip them in place.
         for (const holder of [result, result?.data]) {
           for (const key of ["message", "message_json"]) {
-            if (typeof holder?.[key] === "string") holder[key] = clipBackendText(holder[key]);
+            if (holder?.[key] !== undefined && holder[key] !== null) holder[key] = clipBackendText(holder[key]);
           }
         }
         if (result?.data?.status === "READY") {

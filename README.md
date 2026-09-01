@@ -124,7 +124,9 @@ Reference: [Bluente API Docs](https://www.bluente.com/docs)
 These match the tools exposed by Bluente's hosted MCP server, so a prompt or
 agent written against one works against the other. The differences are the two
 things only a local server can do: `file_path` as a source, and `output_path`
-for saving results to disk (the hosted server hands out download links instead).
+for saving results to disk (the hosted server hands out download links instead)
+— plus `bluente_translate_file`, which here can only cancel a task (starting
+goes through the workflow tool's confirmation gate).
 
 Tool behavior notes:
 
