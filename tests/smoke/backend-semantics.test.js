@@ -18,6 +18,7 @@ import {
   translateFileSchema
 } from "../../src/tools/schemas.js";
 import { TranslationWorkflowService } from "../../src/services/translation-workflow-service.js";
+import { BluenteApiError } from "../../src/lib/errors.js";
 
 test("normalizeLanguageCode maps common ISO codes and passes unknowns through", () => {
   assert.equal(normalizeLanguageCode("zh-CN"), "zh");
@@ -317,6 +318,55 @@ test("the confirm gate is bound to a time-locked, single-use confirm_token", asy
     service.runDocumentWorkflow({ ...confirm, confirmToken: stale.confirm_token }),
     /make the unconfirmed call first/
   );
+
+  // A setting the card asked for may be filled in on confirm; one it displayed
+  // may not change, and mode may only be filled in as the default it printed.
+  const asked = await service.runDocumentWorkflow({ ...baseArgs });
+  clock.now += 20_000;
+  const fill = { ...baseArgs, taskId: asked.task_id, confirmToken: asked.confirm_token, confirmed: true };
+  await assert.rejects(
+    service.runDocumentWorkflow({ ...fill, toType: "word", bilingual: "off", scanned: "image" }),
+    /settings changed/
+  );
+  assert.equal(started(), 1);
+  const filled = await service.runDocumentWorkflow({ ...fill, toType: "word", bilingual: "off", scanned: "standard" });
+  assert.equal(filled.started, true);
+  assert.equal(started(), 2);
+
+  const shown = await service.runDocumentWorkflow({ ...baseArgs, toType: "pdf", bilingual: "none", pageRange: "1-3, 5", from: "zh-CN", to: "en" });
+  clock.now += 20_000;
+  const shownConfirm = { ...baseArgs, taskId: shown.task_id, confirmToken: shown.confirm_token, confirmed: true, from: "zh", to: "en", pageRange: "1-3,5" };
+  await assert.rejects(
+    service.runDocumentWorkflow({ ...shownConfirm, toType: "word", bilingual: "off" }),
+    /settings changed/
+  );
+  // Aliases and whitespace compare by meaning: none/off, zh-CN/zh, "1-3, 5"/"1-3,5".
+  const aliased = await service.runDocumentWorkflow({ ...shownConfirm, toType: "pdf", bilingual: "off" });
+  assert.equal(aliased.started, true);
+  assert.equal(started(), 3);
+
+  // A failed start leaves the token valid, so the same confirmation retries.
+  const retry = await service.runDocumentWorkflow({ ...baseArgs, ...settings });
+  clock.now += 20_000;
+  const retryConfirm = { ...confirm, taskId: retry.task_id, confirmToken: retry.confirm_token };
+  const translateFile = client.translateFile;
+  client.translateFile = async () => {
+    throw new BluenteApiError("Bluente API request failed.", { status: 502 });
+  };
+  await assert.rejects(service.runDocumentWorkflow(retryConfirm), /confirm_token was not consumed: retry/);
+  client.translateFile = translateFile;
+  assert.equal((await service.runDocumentWorkflow(retryConfirm)).started, true);
+  assert.equal(started(), 4);
+
+  // A new card for the same task revokes the earlier token.
+  const first = await service.runDocumentWorkflow({ ...baseArgs, ...settings });
+  await service.runDocumentWorkflow({ ...baseArgs, ...settings });
+  clock.now += 20_000;
+  await assert.rejects(
+    service.runDocumentWorkflow({ ...confirm, taskId: first.task_id, confirmToken: first.confirm_token }),
+    /make the unconfirmed call first/
+  );
+  assert.equal(started(), 4);
 });
 
 test("the card renders an injected document name as one short bare basename", async () => {

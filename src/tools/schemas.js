@@ -156,7 +156,7 @@ export const documentWorkflowSchema = {
     .boolean()
     .default(false)
     .describe(
-      "Set true only after the user has seen the confirmation card returned by a first call and replied confirming it. Requires task_id, confirm_token, and the same settings the card showed. While false (the default) the call stops after returning the card: nothing starts and no credits are deducted."
+      "Set true only after the user has seen the confirmation card returned by a first call and replied confirming it. Requires task_id, confirm_token, and the settings the card showed (filling in any it asked for). While false (the default) the call stops after returning the card: nothing starts and no credits are deducted."
     ),
   confirm_token: z
     .string()

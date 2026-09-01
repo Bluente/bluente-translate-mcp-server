@@ -1,8 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { PRE_TRANSLATION_TERMINAL_STATUSES, TERMINAL_TRANSLATION_STATUSES } from "../constants/api.js";
-import { clipBackendText, safeFileName } from "../clients/bluente-http-client.js";
+import {
+  clipBackendText,
+  expandHome,
+  safeFileName,
+  toBilingualParam,
+  toScannedParam
+} from "../clients/bluente-http-client.js";
 import { BluenteApiError } from "../lib/errors.js";
+import { normalizeLanguageCode } from "../lib/language-codes.js";
 
 // The confirm token ties a confirmed call to the card the user actually saw.
 // notBefore is a heuristic: a model cannot have shown the card and received a
@@ -15,22 +22,40 @@ const CONFIRM_TTL_MS = 15 * 60_000;
 // the backend if the hosted server ever needs the same gate.
 const confirmTokens = new Map();
 
-// The settings the card displayed, in a shape that compares with ===.
-function bindSettings({ from, to, toTypes, bilingual, layout, scanned, pageRange }) {
-  return JSON.stringify({
-    from: from ?? null,
-    to: to ?? null,
-    to_type: [...toTypes].sort(),
-    bilingual: bilingual ?? null,
-    bilingual_layout: layout ?? null,
-    mode: scanned ?? null,
-    page_range: pageRange ?? null
+// The settings the card displayed, in the canonical form the wire path sends
+// (same helpers), so a confirm is compared by meaning, not spelling: "off" is
+// "none", mode "standard" is scanned 0, "zh-CN" is "zh", page_range loses its
+// whitespace. null means the card asked the user for it instead of showing it;
+// a layout only counts when bilingual is on, since the card shows none otherwise.
+function canonicalSettings({ from, to, toTypes, bilingual, layout, scanned, pageRange }) {
+  const bilingualOn = bilingual === undefined || bilingual === null ? null : toBilingualParam(bilingual);
+  return {
+    from: from === undefined || from === null ? null : normalizeLanguageCode(from),
+    to: to === undefined || to === null ? null : normalizeLanguageCode(to),
+    to_type: toTypes.length ? [...toTypes].sort().join("+") : null,
+    bilingual: bilingualOn,
+    bilingual_layout: bilingualOn === 1 ? (layout ?? null) : null,
+    mode: scanned === undefined || scanned === null ? null : toScannedParam(scanned),
+    page_range: pageRange === undefined || pageRange === null ? null : String(pageRange).replace(/\s+/g, "")
+  };
+}
+
+// A card line that read "(ask the user)" may be answered on the confirmed call
+// without a new card, as long as the answer cannot change the quoted cost.
+// mode is fillable only to standard, the default the card said it would use.
+const FILLABLE_SETTINGS = new Set(["to_type", "bilingual", "bilingual_layout"]);
+function settingsMatchCard(card, confirm) {
+  return Object.keys(card).every((key) => {
+    if (card[key] === confirm[key]) return true;
+    if (card[key] !== null) return false;
+    return FILLABLE_SETTINGS.has(key) || (key === "mode" && confirm[key] === 0);
   });
 }
 
 function mintConfirmToken({ taskId, settings, now }) {
+  // A re-card for the same task supersedes any earlier card the user saw.
   for (const [token, entry] of confirmTokens) {
-    if (entry.expires <= now) confirmTokens.delete(token);
+    if (entry.expires <= now || entry.taskId === String(taskId)) confirmTokens.delete(token);
   }
   const token = randomBytes(16).toString("hex");
   confirmTokens.set(token, {
@@ -43,7 +68,9 @@ function mintConfirmToken({ taskId, settings, now }) {
 }
 
 // Throws unless the token was minted for this task with these settings and is
-// old enough for a user to have replied. Consumed on success (single-use).
+// old enough for a user to have replied. Returns commit(), which the caller
+// runs once the start request has succeeded: a failed start leaves the token
+// valid so the same confirmation can simply be retried (single-use on success).
 function consumeConfirmToken({ token, taskId, settings, now }) {
   const entry = token ? confirmTokens.get(token) : undefined;
   if (!entry || entry.expires <= now) {
@@ -57,9 +84,9 @@ function consumeConfirmToken({ token, taskId, settings, now }) {
       "confirm_token was issued for a different task_id. Call again without confirmed to get a new confirmation card. Nothing was started."
     );
   }
-  if (entry.settings !== settings) {
+  if (!settingsMatchCard(entry.settings, settings)) {
     throw new BluenteApiError(
-      "settings changed since the confirmation card; call again without confirmed to get a new card for the user to review. Nothing was started."
+      "settings changed since the confirmation card (a setting the card asked for may be filled in, but one it displayed must match); call again without confirmed to get a new card for the user to review. Nothing was started."
     );
   }
   if (now < entry.notBefore) {
@@ -68,7 +95,7 @@ function consumeConfirmToken({ token, taskId, settings, now }) {
       { retry_after_ms: entry.notBefore - now }
     );
   }
-  confirmTokens.delete(token);
+  return () => confirmTokens.delete(token);
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -260,10 +287,11 @@ export class TranslationWorkflowService {
     // Formats are download-time conversions of one finished translation, so
     // to_type may be a single format or an array of them (no extra credits).
     const toTypes = toType === undefined ? [] : [...new Set([].concat(toType))];
-    const boundSettings = bindSettings({ from, to, toTypes, bilingual, layout, scanned, pageRange });
+    const boundSettings = canonicalSettings({ from, to, toTypes, bilingual, layout, scanned, pageRange });
 
     // The confirm gate: starting deducts credits, so these must be explicit user
     // choices, never schema or model defaults. Checked before any network call.
+    let commitConfirmToken = null;
     if (confirmed) {
       // task_id alone proves nothing (a model can invent one); the confirm_token
       // check below is what ties this call to a card the user was shown.
@@ -292,7 +320,7 @@ export class TranslationWorkflowService {
         );
       }
 
-      consumeConfirmToken({ token: confirmToken, taskId, settings: boundSettings, now: this.now() });
+      commitConfirmToken = consumeConfirmToken({ token: confirmToken, taskId, settings: boundSettings, now: this.now() });
     }
 
     // A task_id from the side-channel upload endpoint means the file is already
@@ -390,7 +418,7 @@ export class TranslationWorkflowService {
             page_range: pageRange ?? null
           },
           next_steps:
-            "Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line — then end your turn and wait for the user's reply. After they confirm, call this tool again with confirmed=true, this task_id, this confirm_token, and exactly the settings shown on the card. If the user changes or fills in any setting, call again WITHOUT confirmed to get a fresh card and confirm_token. A confirmed call is refused for at least 20 seconds after the card, and confirm_token is single-use."
+            "Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line — then end your turn and wait for the user's reply. After they confirm, call this tool again with confirmed=true, this task_id, this confirm_token, and the settings shown on the card, filling in any it asked for (to_type, bilingual, bilingual_layout; mode may only be filled in as 'standard'). If the user changes a setting the card displayed, call again WITHOUT confirmed to get a fresh card and confirm_token. A confirmed call is refused for at least 20 seconds after the card; confirm_token is consumed once the translation starts."
         };
       }
 
@@ -412,6 +440,8 @@ export class TranslationWorkflowService {
         namespace,
         metadata
       });
+      commitConfirmToken?.();
+      commitConfirmToken = null;
 
       const started = {
         id,
@@ -464,7 +494,7 @@ export class TranslationWorkflowService {
       // conversions of one finished translation, so extra formats cost nothing.
       // output_path names the first; the rest keep their own names beside it,
       // rather than scattering into whatever cwd the MCP client launched us in.
-      const outputDir = outputPath ? dirname(resolve(outputPath)) : undefined;
+      const outputDir = outputPath ? dirname(resolve(expandHome(outputPath))) : undefined;
       const downloads = [];
       for (const [index, requestedType] of toTypes.entries()) {
         downloads.push({
@@ -493,6 +523,9 @@ export class TranslationWorkflowService {
           ...(error.details || {}),
           id,
         };
+        if (commitConfirmToken) {
+          error.message += " The confirm_token was not consumed: retry the same confirmed call with it.";
+        }
       }
 
       throw error;
