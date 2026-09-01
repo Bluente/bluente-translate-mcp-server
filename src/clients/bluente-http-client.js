@@ -19,15 +19,20 @@ function inferFilename(fileUrl) {
 
 // File names come from the source document (upload) or the server (download),
 // so they are untrusted: only a bare name survives, never a directory
-// component (win32.basename splits on both / and \), no control characters,
-// no runs of whitespace, and nothing past 80 characters.
-export function safeFileName(name) {
+// component (win32.basename splits on both / and \), no control, bidi-override
+// or Windows-reserved characters, no runs of whitespace, and nothing past
+// maxLength characters (the stem is cut, the extension is kept). The upload
+// name passes Infinity: the backend reads the real extension off it.
+export function safeFileName(name, maxLength = 80) {
   const base = path.win32
-    .basename(String(name).replace(/[\x00-\x1f\x7f]/g, ""))
+    .basename(String(name).replace(/[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069<>:"|?*]/g, ""))
     .replace(/\s+/g, " ")
     .trim();
   if (!base || base === "." || base === "..") return null;
-  return base.length > 80 ? `${base.slice(0, 79)}\u2026` : base;
+  if (Array.from(base).length <= maxLength) return base;
+  const ext = path.extname(base).length <= 10 ? path.extname(base) : "";
+  const stem = Array.from(base.slice(0, base.length - ext.length));
+  return `${stem.slice(0, maxLength - 1 - ext.length).join("")}\u2026${ext}`;
 }
 
 // Backend free text (error messages, raw payloads) is shown to the model, so it
@@ -39,7 +44,7 @@ export function clipBackendText(value) {
   return text.length > MAX_BACKEND_TEXT_CHARS ? `${text.slice(0, MAX_BACKEND_TEXT_CHARS)}\u2026` : text;
 }
 
-export function parseContentDispositionFileName(contentDisposition) {
+export function parseContentDispositionFileName(contentDisposition, maxLength) {
   if (!contentDisposition) {
     return null;
   }
@@ -47,18 +52,25 @@ export function parseContentDispositionFileName(contentDisposition) {
   const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf8Match?.[1]) {
     try {
-      return safeFileName(decodeURIComponent(utf8Match[1]));
+      return safeFileName(decodeURIComponent(utf8Match[1]), maxLength);
     } catch {
-      return safeFileName(utf8Match[1]);
+      return safeFileName(utf8Match[1], maxLength);
     }
   }
 
   const basicMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
-  return basicMatch?.[1] ? safeFileName(basicMatch[1]) : null;
+  return basicMatch?.[1] ? safeFileName(basicMatch[1], maxLength) : null;
+}
+
+// Hosts pass paths through verbatim, so a leading ~ never reaches the shell.
+export function expandHome(p) {
+  return p.replace(/^~(?=$|[\\/])/, os.homedir());
 }
 
 function defaultOutputDir() {
-  return process.env.BLUENTE_OUTPUT_DIR || path.join(os.homedir(), "Downloads", "bluente");
+  return process.env.BLUENTE_OUTPUT_DIR
+    ? expandHome(process.env.BLUENTE_OUTPUT_DIR)
+    : path.join(os.homedir(), "Downloads", "bluente");
 }
 
 // Never clobbers: "wx" fails if the path exists, so a translated file can not
@@ -161,7 +173,7 @@ async function readFileFromUrl({ fileUrl, fileName }) {
   const fileBuffer = await fileResponse.arrayBuffer();
   const resolvedFileName =
     fileName ||
-    parseContentDispositionFileName(fileResponse.headers.get("content-disposition")) ||
+    parseContentDispositionFileName(fileResponse.headers.get("content-disposition"), Infinity) ||
     inferFilename(fileUrl);
 
   return { fileBuffer, resolvedFileName };
@@ -311,9 +323,13 @@ export class BluenteHttpClient {
     // default is a Downloads folder, not whatever cwd the MCP host launched us in.
     let resolvedPath;
     if (outputPath) {
-      resolvedPath = path.resolve(outputPath);
+      resolvedPath = path.resolve(expandHome(outputPath));
+      // An output_path that names an existing directory means "save it in here".
+      if ((await fs.stat(resolvedPath).catch(() => null))?.isDirectory()) {
+        resolvedPath = path.join(resolvedPath, fileName);
+      }
     } else {
-      const dir = outputDir || defaultOutputDir();
+      const dir = outputDir ? expandHome(outputDir) : defaultOutputDir();
       await fs.mkdir(dir, { recursive: true });
       resolvedPath = path.resolve(dir, fileName);
     }
