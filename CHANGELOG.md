@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [0.4.1] - 2026-09-01
+
+### Fixed
+
+- **Scanned modes are not charged extra.** The confirmation card told users `Cost: N pages of credit (scanned modes may cost more per page)` for both scanned modes. The backend charges them nothing extra: `effectiveDeductPages` returns `PageCount * 5` only for image translation and `PageCount` for everything else, `scanned (text)` and `scanned (overlay)` included. The caveat invented a cost the user would never be billed, on the one surface the model is instructed to relay verbatim. It is gone.
+- **Image mode now quotes the amount actually charged.** The card said "costs more per page" beside an unmultiplied page count, so a 3-page poster displayed 3 credits and was billed 15. It now reads `Cost: 15 pages of credit (image mode: 5 per page for 3 pages)`. Credits are pages 1:1, so the multiplied figure is the credit number, not an estimate.
+- The `mode` schema, the workflow tool description, and the README carried the same two errors and now state the rule directly: image is the only mode above the standard rate, at 5 credits per page; scanned costs the same as standard.
+
+> Published `0.4.0` shipped the incorrect copy and has been deprecated on npm. No API, parameter, or behaviour change — the corrections are to user-facing cost guidance only.
+
 ## [0.4.0] - 2026-08-29
 
 Aligns this server's tool interface with Bluente's hosted MCP server, so a prompt
