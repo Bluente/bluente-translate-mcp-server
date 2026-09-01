@@ -84,29 +84,11 @@ export const getStatusSchema = {
   entry: z.enum(["get_page_count", "get_status"]).default("get_status")
 };
 
+// Cancel only. Starting is deliberately not offered here: it deducts credits
+// and must go through the workflow tool's confirmation gate.
 export const translateFileSchema = {
-  id: z.string().min(1),
-  action: z.enum(["start", "cancel"]).default("start"),
-  from: z.string().min(2).optional().describe(LANGUAGE_CODE_DESCRIPTION),
-  to: z.string().min(2).optional().describe(LANGUAGE_CODE_DESCRIPTION),
-  engine: engineSchema,
-  glossary: binaryFlagSchema.default(0),
-  custom_glossary: binaryFlagSchema.default(0),
-  bilingual: z.enum(["line", "paragraph", "none"]).default("none"),
-  vertical_bilingual: binaryFlagSchema.default(0),
-  bilingual_layout: bilingualLayoutSchema.describe(
-    "Bilingual page layout: 'left-right' side by side, 'top-down' stacked. Wins over vertical_bilingual when both are given."
-  ),
-  scanned: z
-    .number()
-    .int()
-    .min(0)
-    .max(3)
-    .default(0)
-    .describe("scanned_option: 0 none, 1 text OCR, 2 overlay, 3 image translation."),
-  page_range: z.string().optional().describe("Pages to translate, e.g. '1-3,5'; whole document when omitted."),
-  namespace: z.string().optional(),
-  metadata: z.record(z.any()).optional()
+  id: z.string().min(1).describe("Task id to cancel."),
+  action: z.enum(["cancel"]).default("cancel")
 };
 
 export const downloadFileSchema = {
