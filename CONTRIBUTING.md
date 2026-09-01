@@ -11,13 +11,9 @@ Thank you for your interest in contributing to `bluente-translate-mcp-server`.
 npm install
 ```
 
-3. Copy environment template:
-
-```bash
-cp .env.example .env
-```
-
-4. Set your test credentials in `.env`:
+3. Set your test credentials in the environment (the server never reads a `.env`
+   file; MCP hosts pass variables through their config's `env` block, and for a
+   terminal run export them or prefix the command). See `.env.example` for names:
 
 - `BLUENTE_API_KEY`
 - `BLUENTE_API_BASE_URL` (optional, defaults to current API version)
