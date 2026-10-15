@@ -121,6 +121,11 @@ function buildTranslateImagesLine({ translateImages, fileName, bilingual, scanne
   if (!isStandardMode(scanned)) {
     return "Translate images: On — only available in Standard mode; turn it off or the start will be rejected";
   }
+  // No extension (task_id upload, file_url without file_name): the type is
+  // unknown here, and the backend rejects anything but Word/PowerPoint.
+  if (ext === null) {
+    return "Translate images: On (Word and PowerPoint only; other file types are rejected at start; no extra credits)";
+  }
   return "Translate images: On (text inside embedded images is translated too; no extra credits)";
 }
 
@@ -401,8 +406,11 @@ export class TranslationWorkflowService {
             translate_images: translateImages ?? null,
             page_range: pageRange ?? null
           },
-          next_steps:
-            "Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line. Ask the user for any (ask the user) values, ask them to confirm or adjust, and wait for their reply. Only after the user has replied to that message, call this tool again with this task_id, confirmed=true, and the final settings (to, to_type, and bilingual must be explicit; when bilingual is on, bilingual_layout too)."
+          // The start reads only the confirmed call's args: a translate_images
+          // set here but dropped there would silently start with it off.
+          next_steps: `Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line. Ask the user for any (ask the user) values, ask them to confirm or adjust, and wait for their reply. Only after the user has replied to that message, call this tool again with this task_id, confirmed=true, and the final settings (to, to_type, and bilingual must be explicit; when bilingual is on, bilingual_layout too${
+            translateImages === undefined || translateImages === null ? "" : "; and translate_images too"
+          }).`
         };
       }
 

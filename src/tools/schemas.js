@@ -183,7 +183,7 @@ export const documentWorkflowSchema = {
   translate_images: translateImagesSchema
     .optional()
     .describe(
-      `${TRANSLATE_IMAGES_DESCRIPTION} Offer it when a Word or PowerPoint document has images containing text; not required when confirmed=true.`
+      `${TRANSLATE_IMAGES_DESCRIPTION} Offer it when a Word or PowerPoint document has images containing text. Pass it again on the confirmed call; omitted means off.`
     ),
   confirmed: z
     .boolean()

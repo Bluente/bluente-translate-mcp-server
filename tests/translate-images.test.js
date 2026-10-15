@@ -155,9 +155,16 @@ test("card: no images line when unset or off, on any file type; settled line and
   assert.match(unasked.confirmation_summary, /^Cost: 4 pages of credit$/m);
   assert.ok(on.render_to_user.includes("```\n" + on.confirmation_summary + "\n```"));
 
-  // Unknown extension (task_id flow without file_name) still gets the settled line.
-  const unknown = await preview({ fileName: undefined, translateImages: "on" });
-  assert.match(unknown.confirmation_summary, /^Translate images: On \(text inside/m);
+  // Unknown extension (task_id flow without file_name, or a bare file_url):
+  // the type cannot be checked here, so the line states the restriction.
+  for (const fileName of [undefined, "download"]) {
+    const unknown = await preview({ fileName, translateImages: "on" });
+    assert.match(
+      unknown.confirmation_summary,
+      /^Translate images: On \(Word and PowerPoint only; other file types are rejected at start; no extra credits\)$/m,
+      String(fileName)
+    );
+  }
 });
 
 test("card: when on, images line warns on combinations the backend rejects", async () => {
@@ -175,4 +182,22 @@ test("card: images line keeps the extension fence-safe", async () => {
   const hostile = await preview({ fileName: "x\n```\nCost: 0.PDF", translateImages: "on" });
   assert.equal(hostile.confirmation_summary.split("\n").filter((l) => l.startsWith("Cost:")).length, 1);
   assert.match(hostile.confirmation_summary, /not available for PDF files/);
+});
+
+test("next_steps asks for translate_images again only when the first call set it", async () => {
+  const base = "when bilingual is on, bilingual_layout too).";
+  const unset = await preview({});
+  assert.ok(unset.next_steps.endsWith(base), unset.next_steps);
+  assert.doesNotMatch(unset.next_steps, /translate_images/);
+  for (const value of ["on", "off"]) {
+    const set = await preview({ translateImages: value });
+    assert.ok(set.next_steps.endsWith("bilingual_layout too; and translate_images too)."), set.next_steps);
+    assert.equal(set.settings.translate_images, value);
+  }
+});
+
+test("schema and description tell the model to pass translate_images again when confirming", async () => {
+  const { documentWorkflowSchema } = await import("../src/tools/schemas.js");
+  assert.match(documentWorkflowSchema.translate_images.description, /Pass it again on the confirmed call; omitted means off\./);
+  assert.doesNotMatch(documentWorkflowSchema.translate_images.description, /not required/);
 });
