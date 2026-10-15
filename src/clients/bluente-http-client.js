@@ -168,6 +168,23 @@ export class BluenteHttpClient {
     return this.requestJson(API_PATHS.SUPPORTED_LANGUAGES, { method: "GET" });
   }
 
+  // Email, organisation and per-feature credits for whoever the token belongs
+  // to. A 404 means the backend predates the endpoint; anything else (auth,
+  // timeouts) keeps its own error so it is not mistaken for that.
+  async getAccount() {
+    try {
+      return await this.requestJson(API_PATHS.ACCOUNT, { method: "GET" });
+    } catch (error) {
+      if (error instanceof BluenteApiError && error.details?.status === 404) {
+        throw new BluenteApiError("Account information isn't available from the Bluente API yet.", {
+          apiPath: API_PATHS.ACCOUNT,
+          status: 404
+        });
+      }
+      throw error;
+    }
+  }
+
   async uploadFile({ fileUrl, filePath, fileBuffer, fileName, engine, glossary }) {
     const source = await readUploadSource({ fileUrl, filePath, fileBuffer, fileName });
 

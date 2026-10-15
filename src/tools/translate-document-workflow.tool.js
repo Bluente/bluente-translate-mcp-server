@@ -16,11 +16,14 @@ const CONFIRMATION_GUIDANCE =
 const BEHAVIOUR_GUIDANCE =
   "Once confirmed, this returns as soon as translation starts; follow the next_steps in the result to poll bluente_get_translation_status and then call bluente_download_file. Pass auto_download=true only for small documents to wait for the result inline and save it to disk, which can block for several minutes and may exceed the host's request timeout.";
 
+const BALANCE_GUIDANCE =
+  "The confirmation card may include a Balance line (current credits, credits left after this translation, and who pays); it is part of the card and must be shown exactly like every other line. If it says the balance is not enough, tell the user before asking them to confirm.";
+
 export function registerTranslateDocumentWorkflowTool(server, { workflowService }) {
   server.registerTool(
     TOOL_NAME,
     {
-      description: `${SOURCE_GUIDANCE} ${MODE_GUIDANCE} ${CONFIRMATION_GUIDANCE} ${BEHAVIOUR_GUIDANCE}`,
+      description: `${SOURCE_GUIDANCE} ${MODE_GUIDANCE} ${CONFIRMATION_GUIDANCE} ${BALANCE_GUIDANCE} ${BEHAVIOUR_GUIDANCE}`,
       inputSchema: documentWorkflowSchema,
       _meta: OPENAI_FILE_PARAMS_META
     },

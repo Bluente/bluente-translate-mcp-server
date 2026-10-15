@@ -4,6 +4,35 @@ import { BluenteApiError } from "../lib/errors.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The card's balance lookup is a nicety: past this it is dropped, never awaited
+// up to the client's 90 s request timeout.
+const ACCOUNT_LOOKUP_TIMEOUT_MS = 3_000;
+
+// One card line from the account view's translate entry (every document mode,
+// image included, spends translate-scope credits). Null when the view has no
+// usable translate balance, so the card simply omits the line.
+function buildBalanceLine(account, credits, clean) {
+  const translate = Array.isArray(account?.credits)
+    ? account.credits.find((entry) => entry?.feature === "translate")
+    : null;
+  if (!translate || typeof translate.balance !== "number") {
+    return null;
+  }
+  const fmt = (n) => n.toLocaleString("en-US");
+  const orgName = account.organization?.name;
+  const payer =
+    translate.paid_by === "organization"
+      ? `paid by ${orgName ? clean(orgName) : "your organisation"}`
+      : "your personal credits";
+  if (typeof credits !== "number") {
+    return `Balance: ${fmt(translate.balance)} credits (${payer})`;
+  }
+  if (translate.balance < credits) {
+    return `Balance: ${fmt(translate.balance)} credits — not enough (needs ${fmt(credits)}). Top up at translate.bluente.com or narrow the page range.`;
+  }
+  return `Balance: ${fmt(translate.balance)} → ${fmt(translate.balance - credits)} credits after this (${payer})`;
+}
+
 // `budget` is shared across both poll phases so max_poll_attempts bounds total wall clock,
 // not each phase separately.
 async function pollStatusUntilTerminal({ client, id, entry, terminalStatuses, pollIntervalMs, budget }) {
@@ -67,7 +96,7 @@ function countRangePages(pageRange) {
   return total;
 }
 
-function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bilingual, bilingualLayout, scanned, pageRange }) {
+function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bilingual, bilingualLayout, scanned, pageRange, account }) {
   const formatLabels = { pdf: "PDF", word: "Word", pptx: "PowerPoint" };
   const layoutLabels = {
     "left-right": "Left-Right (original and translation side by side)",
@@ -111,6 +140,7 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
   // Backend effectiveDeductPages: image translation is charged pages x 5, and
   // every other mode -- both scanned modes included -- is charged pages x 1.
   const credits = isImageMode && typeof pages === "number" ? pages * 5 : pages;
+  const balanceLine = buildBalanceLine(account, credits, clean);
 
   const lines = [
     `Document: ${clean(fileName || "uploaded file")} (${totalPages} page${totalPages === 1 ? "" : "s"})`,
@@ -118,6 +148,7 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
     `Cost: ${credits} page${credits === 1 ? "" : "s"} of credit${
       isImageMode ? ` (image mode: 5 per page for ${pages} page${pages === 1 ? "" : "s"})` : ""
     }`,
+    ...(balanceLine ? [balanceLine] : []),
     `Pages: ${pageRange ? `${clean(pageRange)} (${pages} of ${totalPages} pages)` : "All"}`,
     `Output: ${toTypes.length ? toTypes.map((t) => formatLabels[t] || t).join(" + ") : "(ask the user: PDF, Word, or PowerPoint)"}`,
     `Bilingual: ${bilingual === undefined || bilingual === null ? "(ask the user)" : bilingualLabels[bilingual] || clean(bilingual)}`,
@@ -144,6 +175,26 @@ export class TranslationWorkflowService {
     this.client = client;
   }
 
+  // Never rejects: any failure, a client without getAccount, or a slow backend
+  // yields null and the card goes out without a balance line.
+  async fetchAccountForCard(timeoutMs) {
+    if (typeof this.client.getAccount !== "function") {
+      return null;
+    }
+    let timer;
+    try {
+      const timeout = new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      });
+      const payload = await Promise.race([this.client.getAccount(), timeout]);
+      return payload?.data ?? null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async runDocumentWorkflow({
     taskId,
     fileUrl,
@@ -166,9 +217,13 @@ export class TranslationWorkflowService {
     autoDownload,
     confirmed,
     outputPath,
-    statusEntry = "get_status"
+    statusEntry = "get_status",
+    accountTimeoutMs = ACCOUNT_LOOKUP_TIMEOUT_MS
   }) {
     void statusEntry;
+    // Started now so it overlaps the upload and page-count polling; only the
+    // unconfirmed call renders a card.
+    const accountForCard = confirmed ? null : this.fetchAccountForCard(accountTimeoutMs);
 
     // The deprecated numeric vertical_bilingual (an explicit 0/1 from a stale
     // session) still counts as a chosen layout; bilingual_layout wins when both
@@ -282,7 +337,8 @@ export class TranslationWorkflowService {
           bilingual,
           bilingualLayout: layout,
           scanned,
-          pageRange
+          pageRange,
+          account: await accountForCard
         });
 
         return {
