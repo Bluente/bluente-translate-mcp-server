@@ -109,6 +109,7 @@ tests/smoke/core-smoke.test.js
 - `GET /blu_translate/check`
 - `POST /blu_translate/translate`
 - `GET /blu_translate/download`
+- `GET /blu_translate/account`
 
 Reference: [Bluente API Docs](https://www.bluente.com/docs)
 
@@ -120,6 +121,7 @@ Reference: [Bluente API Docs](https://www.bluente.com/docs)
 - `bluente_translate_file`
 - `bluente_download_file`
 - `bluente_translate_document_workflow`
+- `bluente_get_account` — read-only: the signed-in user's email and name, their organisation (name and role), and credits per feature with balance, who pays (organisation pool or personal credits), and the soonest expiries.
 
 These match the tools exposed by Bluente's hosted MCP server, so a prompt or
 agent written against one works against the other. The differences are the two
@@ -128,7 +130,7 @@ for saving results to disk (the hosted server hands out download links instead).
 
 Tool behavior notes:
 
-- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count` plus a confirmation card for the user; **nothing starts and no credits are deducted**. Call again with the returned `task_id`, `confirmed=true`, and explicit `to`, `to_type`, and `bilingual` values to actually start. `bluente_translate_file` has no gate and starts immediately.
+- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count` plus a confirmation card for the user; **nothing starts and no credits are deducted**. The card includes a `Balance:` line with the current translate balance, the balance after this translation, and who pays — or a warning when the balance is not enough; if the account lookup fails or takes over 3 seconds, the card is shown without it. Call again with the returned `task_id`, `confirmed=true`, and explicit `to`, `to_type`, and `bilingual` values to actually start. `bluente_translate_file` has no gate and starts immediately.
 - **File sources**: `file_path` (a file on this machine), `file_url` (a public link), or `file_content_base64` (under 2MB).
 - `bluente_translate_file`: `from` and `to` are required when `action="start"` and optional when `action="cancel"`.
 - **`to_type`**: `pdf`, `word`, or `pptx`. The workflow tool also accepts an array (e.g. `["word", "pdf"]`) — extra formats are download-time conversions of the same translation and cost no extra credits.
@@ -205,7 +207,7 @@ Prefer not to paste your API key into an agent conversation? Have the agent use 
    }
    ```
 
-3. Quit and reopen Claude Desktop. The tools icon should list six `bluente_*` tools.
+3. Quit and reopen Claude Desktop. The tools icon should list seven `bluente_*` tools.
 
 **Claude Code** — one command, then restart your session and verify with `/mcp`:
 
