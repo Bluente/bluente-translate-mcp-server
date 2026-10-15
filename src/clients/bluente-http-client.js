@@ -92,6 +92,12 @@ export function toScannedParam(value) {
   return Number.isInteger(asNumber) && asNumber >= 0 && asNumber <= 3 ? asNumber : 0;
 }
 
+// Backend: TranslateImage = (translate_image == "1"), read from the query on
+// action=start. Sent as 0 when off or unset, like the web app.
+export function toTranslateImageParam(value) {
+  return value === "on" || value === 1 || value === "1" || value === true ? 1 : 0;
+}
+
 function isRuntimeUrl(value) {
   if (typeof value !== "string" || !value.trim()) {
     return false;
@@ -241,7 +247,8 @@ export class BluenteHttpClient {
                 request.bilingualLayout,
                 request.verticalBilingual
               ),
-              scanned: toScannedParam(request.scanned)
+              scanned: toScannedParam(request.scanned),
+              translate_image: toTranslateImageParam(request.translateImages)
             }
           : undefined,
       headers: { "Content-Type": "application/json" },

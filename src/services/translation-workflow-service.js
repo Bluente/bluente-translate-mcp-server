@@ -96,7 +96,40 @@ function countRangePages(pageRange) {
   return total;
 }
 
-function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bilingual, bilingualLayout, scanned, pageRange, account }) {
+// Backend feature translate_images_within_file: applies to DOC/DOCX/PPT/PPTX in
+// Standard mode only and conflicts with bilingual; any other combination is
+// rejected at start (before credits are deducted). It never changes the charge:
+// effectiveDeductPages ignores TranslateImage. Null = no line (an unasked option
+// on a file it cannot apply to).
+const TRANSLATE_IMAGES_FILE_TYPES = new Set(["doc", "docx", "ppt", "pptx"]);
+
+function isStandardMode(scanned) {
+  return scanned === undefined || scanned === null || scanned === 0 || scanned === "standard" || scanned === "none";
+}
+
+function buildTranslateImagesLine({ translateImages, fileName, bilingual, scanned, clean }) {
+  const match = /\.([A-Za-z0-9]+)$/.exec(String(fileName ?? ""));
+  const ext = match ? match[1].toLowerCase() : null;
+  const applicable = ext === null || TRANSLATE_IMAGES_FILE_TYPES.has(ext);
+  if (translateImages !== "on") {
+    if (!applicable) return null;
+    return translateImages === "off"
+      ? "Translate images: Off"
+      : "Translate images: Off (default — turn on to also translate text inside embedded images, no extra credits)";
+  }
+  if (!applicable) {
+    return `Translate images: On — not available for ${clean(ext.toUpperCase())} files (Word and PowerPoint only); turn it off or the start will be rejected`;
+  }
+  if (isBilingualOn(bilingual)) {
+    return "Translate images: On — cannot be combined with bilingual output; turn one of them off or the start will be rejected";
+  }
+  if (!isStandardMode(scanned)) {
+    return "Translate images: On — only available in Standard mode; turn it off or the start will be rejected";
+  }
+  return "Translate images: On (text inside embedded images is translated too; no extra credits)";
+}
+
+function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bilingual, bilingualLayout, scanned, translateImages, pageRange, account }) {
   const formatLabels = { pdf: "PDF", word: "Word", pptx: "PowerPoint" };
   const layoutLabels = {
     "left-right": "Left-Right (original and translation side by side)",
@@ -141,6 +174,7 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
   // every other mode -- both scanned modes included -- is charged pages x 1.
   const credits = isImageMode && typeof pages === "number" ? pages * 5 : pages;
   const balanceLine = buildBalanceLine(account, credits, clean);
+  const translateImagesLine = buildTranslateImagesLine({ translateImages, fileName, bilingual, scanned, clean });
 
   const lines = [
     `Document: ${clean(fileName || "uploaded file")} (${totalPages} page${totalPages === 1 ? "" : "s"})`,
@@ -164,7 +198,8 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
     // undefined means neither mode nor the deprecated scanned arg was passed:
     // that is a defaulted mode, rendered as an ask; an explicit value (even
     // "standard") renders the settled label.
-    scanned === undefined || scanned === null ? MODE_ASK_LINE : `Mode: ${modeLabels[scanned] ?? "Standard"}`
+    scanned === undefined || scanned === null ? MODE_ASK_LINE : `Mode: ${modeLabels[scanned] ?? "Standard"}`,
+    ...(translateImagesLine ? [translateImagesLine] : [])
   ];
 
   return lines.join("\n");
@@ -209,6 +244,7 @@ export class TranslationWorkflowService {
     bilingualLayout,
     verticalBilingual,
     scanned,
+    translateImages,
     pageRange,
     namespace,
     metadata,
@@ -337,6 +373,7 @@ export class TranslationWorkflowService {
           bilingual,
           bilingualLayout: layout,
           scanned,
+          translateImages,
           pageRange,
           account: await accountForCard
         });
@@ -366,6 +403,7 @@ export class TranslationWorkflowService {
             bilingual_layout: layout ?? null,
             vertical_bilingual: verticalBilingual ?? null,
             mode: scanned ?? null,
+            translate_images: translateImages ?? null,
             page_range: pageRange ?? null
           },
           next_steps:
@@ -387,6 +425,7 @@ export class TranslationWorkflowService {
         bilingualLayout: layout,
         verticalBilingual,
         scanned,
+        translateImages,
         pageRange,
         namespace,
         metadata
