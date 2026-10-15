@@ -109,6 +109,7 @@ tests/smoke/core-smoke.test.js
 - `GET /blu_translate/check`
 - `POST /blu_translate/translate`
 - `GET /blu_translate/download`
+- `GET /blu_translate/account`
 
 Reference: [Bluente API Docs](https://www.bluente.com/docs)
 
@@ -120,6 +121,7 @@ Reference: [Bluente API Docs](https://www.bluente.com/docs)
 - `bluente_translate_file`
 - `bluente_download_file`
 - `bluente_translate_document_workflow`
+- `bluente_get_account` — read-only: the signed-in user's email and name, their organisation (name and role), and credits per feature with balance, who pays (organisation pool or personal credits), and the soonest expiries.
 
 These match the tools exposed by Bluente's hosted MCP server, so a prompt or
 agent written against one works against the other. The differences are the two
@@ -128,7 +130,7 @@ for saving results to disk (the hosted server hands out download links instead).
 
 Tool behavior notes:
 
-- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count` plus a confirmation card for the user; **nothing starts and no credits are deducted**. Call again with the returned `task_id`, `confirmed=true`, and explicit `to`, `to_type`, and `bilingual` values to actually start. `bluente_translate_file` has no gate and starts immediately.
+- **Confirmation gate**: `bluente_translate_document_workflow` is a two-call flow. The first call uploads the file and returns `page_count` plus a confirmation card for the user; **nothing starts and no credits are deducted**. The card includes a `Balance:` line with the current translate balance, the balance after this translation, and who pays — or a warning when the balance is not enough; if the account lookup fails or takes over 3 seconds, the card is shown without it. Call again with the returned `task_id`, `confirmed=true`, and explicit `to`, `to_type`, and `bilingual` values to actually start. `bluente_translate_file` has no gate and starts immediately.
 - **File sources**: `file_path` (a file on this machine), `file_url` (a public link), or `file_content_base64` (under 2MB).
 - `bluente_translate_file`: `from` and `to` are required when `action="start"` and optional when `action="cancel"`.
 - **`to_type`**: `pdf`, `word`, or `pptx`. The workflow tool also accepts an array (e.g. `["word", "pdf"]`) — extra formats are download-time conversions of the same translation and cost no extra credits.
@@ -137,6 +139,7 @@ Tool behavior notes:
 - **`bilingual`**: `on` keeps the original text alongside the translation; `off` (default) produces a clean translated document. When `on`, set **`bilingual_layout`** to `left-right` (side by side) or `top-down` (stacked) — these are the only two layouts Bluente supports. The numeric `vertical_bilingual` flag is a deprecated alias.
 - **`mode`**: `standard` (most digital documents), `scanned (text)` (OCR a scan into a clean text-only document), `scanned (overlay)` (place the translation back over the original scanned layout), or `image` (re-render a graphic like a brochure or poster in the target language; 5 credits per page — the only mode charged above the standard rate, scanned modes cost the same as standard). The numeric `scanned` 0–3 flag is a deprecated alias.
 - **`page_range`** (e.g. `"1-3,5"`): translate only selected pages; credits are charged only for those pages.
+- **`translate_images`**: `on` also translates the text inside images embedded in a Word or PowerPoint file (DOC, DOCX, PPT, PPTX) — charts, screenshots, scanned figures; `off` (default) translates only the document's text. No extra credits. Standard mode only; not available for PDFs or together with bilingual output (the backend rejects those). Pass it again on the confirmed call; omitted means off.
 - **Glossary**: the workflow tool always translates with the glossary enabled (matching the Bluente web product); its `glossary`/`custom_glossary` arguments are deprecated and ignored. On the raw `bluente_translate_file` tool the backend applies the glossary only when *both* `glossary` and `custom_glossary` are `1`.
 
 Success envelope:
@@ -205,7 +208,7 @@ Prefer not to paste your API key into an agent conversation? Have the agent use 
    }
    ```
 
-3. Quit and reopen Claude Desktop. The tools icon should list six `bluente_*` tools.
+3. Quit and reopen Claude Desktop. The tools icon should list seven `bluente_*` tools.
 
 **Claude Code** — one command, then restart your session and verify with `/mcp`:
 

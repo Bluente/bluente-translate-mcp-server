@@ -30,6 +30,7 @@ export function registerTranslateFileTool(server, { client }) {
           bilingualLayout: args.bilingual_layout,
           verticalBilingual: args.vertical_bilingual,
           scanned: args.scanned,
+          translateImages: args.translate_images,
           pageRange: args.page_range,
           namespace: args.namespace,
           metadata: args.metadata

@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [0.5.0] - 2026-10-15
+
+### Added
+
+- **`bluente_get_account`** — who the API key belongs to (email, name), their organisation (name and role), and credits per feature: balance, who pays (the organisation's pool or personal credits), and the soonest expiries. Read-only. Requires the Bluente API's `/blu_translate/account` endpoint; before it is live the tool reports "Account information isn't available from the Bluente API yet."
+- **Balance line on the confirmation card.** The first `bluente_translate_document_workflow` call now shows the current balance, the balance after this translation, and who pays — or warns when the balance is not enough. If the account lookup fails or takes over 3 seconds, the card is shown without it.
+- **`translate_images`** (`"on"` | `"off"`) on `bluente_translate_document_workflow` and `bluente_translate_file` — the web app's "Translate images within the file": also translates text inside images embedded in Word or PowerPoint files (DOC, DOCX, PPT, PPTX). Off by default, no extra credits, Standard mode only, not with bilingual output; sent as `translate_image=0|1` on start. When it is on, the confirmation card shows a `Translate images:` line, with a warning if the backend would reject the combination; unset or off adds no line. Pass it again on the confirmed call; omitted means off.
+
+## [0.4.1] - 2026-09-01
+
+### Fixed
+
+- **Scanned modes are not charged extra.** The confirmation card told users `Cost: N pages of credit (scanned modes may cost more per page)` for both scanned modes. The backend charges them nothing extra: `effectiveDeductPages` returns `PageCount * 5` only for image translation and `PageCount` for everything else, `scanned (text)` and `scanned (overlay)` included. The caveat invented a cost the user would never be billed, on the one surface the model is instructed to relay verbatim. It is gone.
+- **Image mode now quotes the amount actually charged.** The card said "costs more per page" beside an unmultiplied page count, so a 3-page poster displayed 3 credits and was billed 15. It now reads `Cost: 15 pages of credit (image mode: 5 per page for 3 pages)`. Credits are pages 1:1, so the multiplied figure is the credit number, not an estimate.
+- The `mode` schema, the workflow tool description, and the README carried the same two errors and now state the rule directly: image is the only mode above the standard rate, at 5 credits per page; scanned costs the same as standard.
+
+> Published `0.4.0` shipped the incorrect copy and has been deprecated on npm. No API, parameter, or behaviour change — the corrections are to user-facing cost guidance only.
+
 ## [0.4.0] - 2026-08-29
 
 Aligns this server's tool interface with Bluente's hosted MCP server, so a prompt

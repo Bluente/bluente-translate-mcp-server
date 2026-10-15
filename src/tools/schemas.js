@@ -4,6 +4,13 @@ import { DEFAULT_MAX_POLL_ATTEMPTS, DEFAULT_POLL_INTERVAL_MS } from "../constant
 export const engineSchema = z.number().int().default(3).describe("Translation engine code. Use 3.");
 export const binaryFlagSchema = z.number().int().min(0).max(1);
 
+// Backend reads translate_image=1 on action=start (feature translate_images_within_file):
+// Standard mode, DOC/DOCX/PPT/PPTX only, conflicts with bilingual, and charged
+// at the same 1 credit per page (effectiveDeductPages ignores it).
+const TRANSLATE_IMAGES_DESCRIPTION =
+  "Translate images within the file: 'on' also translates the text inside images embedded in a Word or PowerPoint file (DOC, DOCX, PPT, PPTX) — e.g. charts, screenshots, scanned figures, diagrams with labels; 'off' (the default) translates only the document's text. No extra credits. Standard mode only; not available for PDFs or together with bilingual output.";
+export const translateImagesSchema = z.enum(["on", "off"]);
+
 const LANGUAGE_CODE_DESCRIPTION =
   "Bluente language code, e.g. en, zh (Simplified Chinese), cht (Traditional Chinese), jp (Japanese), kor (Korean), fra (French), spa (Spanish), de (German). Common ISO codes like zh-CN/ja/ko/fr/es are auto-aliased. For other languages call bluente_get_supported_languages.";
 
@@ -104,6 +111,7 @@ export const translateFileSchema = {
     .max(3)
     .default(0)
     .describe("scanned_option: 0 none, 1 text OCR, 2 overlay, 3 image translation."),
+  translate_images: translateImagesSchema.default("off").describe(TRANSLATE_IMAGES_DESCRIPTION),
   page_range: z.string().optional().describe("Pages to translate, e.g. '1-3,5'; whole document when omitted."),
   namespace: z.string().optional(),
   metadata: z.record(z.any()).optional()
@@ -170,6 +178,13 @@ export const documentWorkflowSchema = {
     .max(3)
     .optional()
     .describe("Deprecated numeric alias for mode (0-3); prefer mode."),
+  // No schema default: unset and "off" both send translate_image=0 and add no
+  // card line.
+  translate_images: translateImagesSchema
+    .optional()
+    .describe(
+      `${TRANSLATE_IMAGES_DESCRIPTION} Offer it when a Word or PowerPoint document has images containing text. Pass it again on the confirmed call; omitted means off.`
+    ),
   confirmed: z
     .boolean()
     .default(false)
