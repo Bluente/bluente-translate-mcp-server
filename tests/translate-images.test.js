@@ -136,39 +136,39 @@ test("both translate tools expose translate_images as an on/off enum", async () 
   assert.equal(translateCalls[1].translateImages, "on");
 });
 
-test("card: images line is a default when unasked, settled when chosen, and cost is unchanged", async () => {
-  const unasked = await preview({});
-  assert.match(unasked.confirmation_summary, /^Translate images: Off \(default — turn on/m);
-  assert.equal(unasked.settings.translate_images, null);
+test("card: no images line when unset or off, on any file type; settled line and unchanged cost when on", async () => {
+  for (const fileName of ["deck.docx", "report.pdf", undefined]) {
+    const unasked = await preview({ fileName });
+    assert.doesNotMatch(unasked.confirmation_summary, /Translate images/, `unset ${fileName}`);
+    assert.equal(unasked.settings.translate_images, null);
+    const off = await preview({ fileName, translateImages: "off" });
+    assert.doesNotMatch(off.confirmation_summary, /Translate images/, `off ${fileName}`);
+    assert.equal(off.settings.translate_images, "off");
+  }
 
-  const off = await preview({ translateImages: "off" });
-  assert.match(off.confirmation_summary, /^Translate images: Off$/m);
-
-  const on = await preview({ translateImages: "on", scanned: "standard" });
+  const unasked = await preview({ fileName: "deck.docx" });
+  const on = await preview({ fileName: "deck.docx", translateImages: "on", scanned: "standard" });
   assert.match(on.confirmation_summary, /^Translate images: On \(text inside embedded images is translated too; no extra credits\)$/m);
   assert.equal(on.settings.translate_images, "on");
   // Same 1x charge either way.
   assert.match(on.confirmation_summary, /^Cost: 4 pages of credit$/m);
   assert.match(unasked.confirmation_summary, /^Cost: 4 pages of credit$/m);
   assert.ok(on.render_to_user.includes("```\n" + on.confirmation_summary + "\n```"));
+
+  // Unknown extension (task_id flow without file_name) still gets the settled line.
+  const unknown = await preview({ fileName: undefined, translateImages: "on" });
+  assert.match(unknown.confirmation_summary, /^Translate images: On \(text inside/m);
 });
 
-test("card: images line warns on combinations the backend rejects, and hides on PDFs when unasked", async () => {
-  const pdfUnasked = await preview({ fileName: "report.pdf" });
-  assert.doesNotMatch(pdfUnasked.confirmation_summary, /Translate images/);
-
+test("card: when on, images line warns on combinations the backend rejects", async () => {
   const pdfOn = await preview({ fileName: "report.pdf", translateImages: "on" });
-  assert.match(pdfOn.confirmation_summary, /Translate images: On — not available for PDF files/);
+  assert.match(pdfOn.confirmation_summary, /^Translate images: On — not available for PDF files \(Word and PowerPoint only\); turn it off or the start will be rejected$/m);
 
   const bilingual = await preview({ translateImages: "on", bilingual: "on", bilingualLayout: "top-down" });
-  assert.match(bilingual.confirmation_summary, /Translate images: On — cannot be combined with bilingual output/);
+  assert.match(bilingual.confirmation_summary, /^Translate images: On — cannot be combined with bilingual output; turn one of them off or the start will be rejected$/m);
 
   const scanned = await preview({ translateImages: "on", scanned: "scanned (overlay)" });
-  assert.match(scanned.confirmation_summary, /Translate images: On — only available in Standard mode/);
-
-  // An unknown extension (task_id flow without file_name) still shows the line.
-  const unknown = await preview({ fileName: undefined });
-  assert.match(unknown.confirmation_summary, /Translate images: Off \(default/);
+  assert.match(scanned.confirmation_summary, /^Translate images: On — only available in Standard mode; turn it off or the start will be rejected$/m);
 });
 
 test("card: images line keeps the extension fence-safe", async () => {

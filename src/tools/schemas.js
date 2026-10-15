@@ -178,8 +178,8 @@ export const documentWorkflowSchema = {
     .max(3)
     .optional()
     .describe("Deprecated numeric alias for mode (0-3); prefer mode."),
-  // No schema default, like mode: the card tells "user chose off" from "never
-  // asked" (an unasked value renders as "Off (default ...)").
+  // No schema default: unset and "off" both send translate_image=0 and add no
+  // card line.
   translate_images: translateImagesSchema
     .optional()
     .describe(

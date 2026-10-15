@@ -99,8 +99,7 @@ function countRangePages(pageRange) {
 // Backend feature translate_images_within_file: applies to DOC/DOCX/PPT/PPTX in
 // Standard mode only and conflicts with bilingual; any other combination is
 // rejected at start (before credits are deducted). It never changes the charge:
-// effectiveDeductPages ignores TranslateImage. Null = no line (an unasked option
-// on a file it cannot apply to).
+// effectiveDeductPages ignores TranslateImage. Null = no line (unset or off).
 const TRANSLATE_IMAGES_FILE_TYPES = new Set(["doc", "docx", "ppt", "pptx"]);
 
 function isStandardMode(scanned) {
@@ -111,12 +110,8 @@ function buildTranslateImagesLine({ translateImages, fileName, bilingual, scanne
   const match = /\.([A-Za-z0-9]+)$/.exec(String(fileName ?? ""));
   const ext = match ? match[1].toLowerCase() : null;
   const applicable = ext === null || TRANSLATE_IMAGES_FILE_TYPES.has(ext);
-  if (translateImages !== "on") {
-    if (!applicable) return null;
-    return translateImages === "off"
-      ? "Translate images: Off"
-      : "Translate images: Off (default — turn on to also translate text inside embedded images, no extra credits)";
-  }
+  // Off is the default and changes nothing, so it gets no line on any file type.
+  if (translateImages !== "on") return null;
   if (!applicable) {
     return `Translate images: On — not available for ${clean(ext.toUpperCase())} files (Word and PowerPoint only); turn it off or the start will be rejected`;
   }
