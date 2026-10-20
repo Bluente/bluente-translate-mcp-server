@@ -5,7 +5,8 @@ export const API_PATHS = {
   UPLOAD_FILE: "/blu_translate/upload",
   GET_TRANSLATION_STATUS: "/blu_translate/check",
   TRANSLATE_FILE: "/blu_translate/translate",
-  DOWNLOAD_FILE: "/blu_translate/download"
+  DOWNLOAD_FILE: "/blu_translate/download",
+  ACCOUNT: "/blu_translate/account"
 };
 
 // The upload has to finish server-side processing (page count, text extraction)

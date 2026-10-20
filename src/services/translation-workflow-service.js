@@ -4,6 +4,35 @@ import { BluenteApiError } from "../lib/errors.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The card's balance lookup is a nicety: past this it is dropped, never awaited
+// up to the client's 90 s request timeout.
+const ACCOUNT_LOOKUP_TIMEOUT_MS = 3_000;
+
+// One card line from the account view's translate entry (every document mode,
+// image included, spends translate-scope credits). Null when the view has no
+// usable translate balance, so the card simply omits the line.
+function buildBalanceLine(account, credits, clean) {
+  const translate = Array.isArray(account?.credits)
+    ? account.credits.find((entry) => entry?.feature === "translate")
+    : null;
+  if (!translate || typeof translate.balance !== "number") {
+    return null;
+  }
+  const fmt = (n) => n.toLocaleString("en-US");
+  const orgName = account.organization?.name;
+  const payer =
+    translate.paid_by === "organization"
+      ? `paid by ${orgName ? clean(orgName) : "your organisation"}`
+      : "your personal credits";
+  if (typeof credits !== "number") {
+    return `Balance: ${fmt(translate.balance)} credits (${payer})`;
+  }
+  if (translate.balance < credits) {
+    return `Balance: ${fmt(translate.balance)} credits — not enough (needs ${fmt(credits)}). Top up at translate.bluente.com or narrow the page range.`;
+  }
+  return `Balance: ${fmt(translate.balance)} → ${fmt(translate.balance - credits)} credits after this (${payer})`;
+}
+
 // `budget` is shared across both poll phases so max_poll_attempts bounds total wall clock,
 // not each phase separately.
 async function pollStatusUntilTerminal({ client, id, entry, terminalStatuses, pollIntervalMs, budget }) {
@@ -67,7 +96,40 @@ function countRangePages(pageRange) {
   return total;
 }
 
-function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bilingual, bilingualLayout, scanned, pageRange }) {
+// Backend feature translate_images_within_file: applies to DOC/DOCX/PPT/PPTX in
+// Standard mode only and conflicts with bilingual; any other combination is
+// rejected at start (before credits are deducted). It never changes the charge:
+// effectiveDeductPages ignores TranslateImage. Null = no line (unset or off).
+const TRANSLATE_IMAGES_FILE_TYPES = new Set(["doc", "docx", "ppt", "pptx"]);
+
+function isStandardMode(scanned) {
+  return scanned === undefined || scanned === null || scanned === 0 || scanned === "standard" || scanned === "none";
+}
+
+function buildTranslateImagesLine({ translateImages, fileName, bilingual, scanned, clean }) {
+  const match = /\.([A-Za-z0-9]+)$/.exec(String(fileName ?? ""));
+  const ext = match ? match[1].toLowerCase() : null;
+  const applicable = ext === null || TRANSLATE_IMAGES_FILE_TYPES.has(ext);
+  // Off is the default and changes nothing, so it gets no line on any file type.
+  if (translateImages !== "on") return null;
+  if (!applicable) {
+    return `Translate images: On — not available for ${clean(ext.toUpperCase())} files (Word and PowerPoint only); turn it off or the start will be rejected`;
+  }
+  if (isBilingualOn(bilingual)) {
+    return "Translate images: On — cannot be combined with bilingual output; turn one of them off or the start will be rejected";
+  }
+  if (!isStandardMode(scanned)) {
+    return "Translate images: On — only available in Standard mode; turn it off or the start will be rejected";
+  }
+  // No extension (task_id upload, file_url without file_name): the type is
+  // unknown here, and the backend rejects anything but Word/PowerPoint.
+  if (ext === null) {
+    return "Translate images: On (Word and PowerPoint only; other file types are rejected at start; no extra credits)";
+  }
+  return "Translate images: On (text inside embedded images is translated too; no extra credits)";
+}
+
+function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bilingual, bilingualLayout, scanned, translateImages, pageRange, account }) {
   const formatLabels = { pdf: "PDF", word: "Word", pptx: "PowerPoint" };
   const layoutLabels = {
     "left-right": "Left-Right (original and translation side by side)",
@@ -111,6 +173,8 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
   // Backend effectiveDeductPages: image translation is charged pages x 5, and
   // every other mode -- both scanned modes included -- is charged pages x 1.
   const credits = isImageMode && typeof pages === "number" ? pages * 5 : pages;
+  const balanceLine = buildBalanceLine(account, credits, clean);
+  const translateImagesLine = buildTranslateImagesLine({ translateImages, fileName, bilingual, scanned, clean });
 
   const lines = [
     `Document: ${clean(fileName || "uploaded file")} (${totalPages} page${totalPages === 1 ? "" : "s"})`,
@@ -118,6 +182,7 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
     `Cost: ${credits} page${credits === 1 ? "" : "s"} of credit${
       isImageMode ? ` (image mode: 5 per page for ${pages} page${pages === 1 ? "" : "s"})` : ""
     }`,
+    ...(balanceLine ? [balanceLine] : []),
     `Pages: ${pageRange ? `${clean(pageRange)} (${pages} of ${totalPages} pages)` : "All"}`,
     `Output: ${toTypes.length ? toTypes.map((t) => formatLabels[t] || t).join(" + ") : "(ask the user: PDF, Word, or PowerPoint)"}`,
     `Bilingual: ${bilingual === undefined || bilingual === null ? "(ask the user)" : bilingualLabels[bilingual] || clean(bilingual)}`,
@@ -133,7 +198,8 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
     // undefined means neither mode nor the deprecated scanned arg was passed:
     // that is a defaulted mode, rendered as an ask; an explicit value (even
     // "standard") renders the settled label.
-    scanned === undefined || scanned === null ? MODE_ASK_LINE : `Mode: ${modeLabels[scanned] ?? "Standard"}`
+    scanned === undefined || scanned === null ? MODE_ASK_LINE : `Mode: ${modeLabels[scanned] ?? "Standard"}`,
+    ...(translateImagesLine ? [translateImagesLine] : [])
   ];
 
   return lines.join("\n");
@@ -142,6 +208,26 @@ function buildConfirmationSummary({ fileName, pageCount, from, to, toTypes, bili
 export class TranslationWorkflowService {
   constructor({ client }) {
     this.client = client;
+  }
+
+  // Never rejects: any failure, a client without getAccount, or a slow backend
+  // yields null and the card goes out without a balance line.
+  async fetchAccountForCard(timeoutMs) {
+    if (typeof this.client.getAccount !== "function") {
+      return null;
+    }
+    let timer;
+    try {
+      const timeout = new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      });
+      const payload = await Promise.race([this.client.getAccount(), timeout]);
+      return payload?.data ?? null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async runDocumentWorkflow({
@@ -158,6 +244,7 @@ export class TranslationWorkflowService {
     bilingualLayout,
     verticalBilingual,
     scanned,
+    translateImages,
     pageRange,
     namespace,
     metadata,
@@ -166,9 +253,13 @@ export class TranslationWorkflowService {
     autoDownload,
     confirmed,
     outputPath,
-    statusEntry = "get_status"
+    statusEntry = "get_status",
+    accountTimeoutMs = ACCOUNT_LOOKUP_TIMEOUT_MS
   }) {
     void statusEntry;
+    // Started now so it overlaps the upload and page-count polling; only the
+    // unconfirmed call renders a card.
+    const accountForCard = confirmed ? null : this.fetchAccountForCard(accountTimeoutMs);
 
     // The deprecated numeric vertical_bilingual (an explicit 0/1 from a stale
     // session) still counts as a chosen layout; bilingual_layout wins when both
@@ -282,7 +373,9 @@ export class TranslationWorkflowService {
           bilingual,
           bilingualLayout: layout,
           scanned,
-          pageRange
+          translateImages,
+          pageRange,
+          account: await accountForCard
         });
 
         return {
@@ -310,10 +403,14 @@ export class TranslationWorkflowService {
             bilingual_layout: layout ?? null,
             vertical_bilingual: verticalBilingual ?? null,
             mode: scanned ?? null,
+            translate_images: translateImages ?? null,
             page_range: pageRange ?? null
           },
-          next_steps:
-            "Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line. Ask the user for any (ask the user) values, ask them to confirm or adjust, and wait for their reply. Only after the user has replied to that message, call this tool again with this task_id, confirmed=true, and the final settings (to, to_type, and bilingual must be explicit; when bilingual is on, bilingual_layout too)."
+          // The start reads only the confirmed call's args: a translate_images
+          // set here but dropped there would silently start with it off.
+          next_steps: `Nothing has started and no credits were deducted. You MUST render the fenced block in render_to_user to the user exactly as-is — do not paraphrase, shorten, reorder, or omit any line. Ask the user for any (ask the user) values, ask them to confirm or adjust, and wait for their reply. Only after the user has replied to that message, call this tool again with this task_id, confirmed=true, and the final settings (to, to_type, and bilingual must be explicit; when bilingual is on, bilingual_layout too${
+            translateImages === undefined || translateImages === null ? "" : "; and translate_images too"
+          }).`
         };
       }
 
@@ -331,6 +428,7 @@ export class TranslationWorkflowService {
         bilingualLayout: layout,
         verticalBilingual,
         scanned,
+        translateImages,
         pageRange,
         namespace,
         metadata
